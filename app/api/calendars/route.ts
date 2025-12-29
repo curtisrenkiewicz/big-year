@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!(session as any)?.user?.id) {
     return NextResponse.json({ calendars: [] }, { status: 200 });
   }
   const accounts = await getFreshGoogleAccountsForUser((session as any).user.id as string);

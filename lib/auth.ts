@@ -135,8 +135,14 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       (session as any).accessToken = token.accessToken;
       (session as any).googleAccounts = token.googleAccounts || [];
-      (session as any).user = token.user;
-      // Ensure session.user.id is present (Prisma adapter provides)
+      // Carry over any user object we stored on the token during sign-in
+      const existingUser = (token as any).user || (session as any).user || {};
+      // Always ensure an id is present using the JWT subject
+      const ensuredUser = {
+        ...existingUser,
+        id: (existingUser && existingUser.id) || (token as any).sub,
+      };
+      (session as any).user = ensuredUser;
       return session;
     },
   },
