@@ -13,12 +13,15 @@ npm install
 2. Create `.env` in the project root with:
 
 ```
+DATABASE_URL=your-postgresql-database-url
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=replace-with-a-strong-random-string
 
 GOOGLE_CLIENT_ID=your-google-oauth-client-id
 GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
 ```
+
+For local development, you can use a local PostgreSQL database or a free hosted option like [Neon](https://neon.tech) or [Supabase](https://supabase.com).
 
 3. Configure your Google OAuth app:
    - App type: Web application
