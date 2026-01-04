@@ -137,7 +137,7 @@ export function YearCalendar({
   onUpdateEvent,
   writableCalendars = [],
   writableAccountsWithCalendars = [],
-  showDaysOfWeek = true,
+  showDaysOfWeek = false,
 }: {
   year: number;
   events: AllDayEvent[];

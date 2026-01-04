@@ -49,7 +49,7 @@ export default function HomePage() {
   );
   const [hiddenEventIds, setHiddenEventIds] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState<boolean>(false);
-  const [showDaysOfWeek, setShowDaysOfWeek] = useState<boolean>(true);
+  const [showDaysOfWeek, setShowDaysOfWeek] = useState<boolean>(false);
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [createTitle, setCreateTitle] = useState<string>("");
   const [createStartDate, setCreateStartDate] = useState<string>("");
@@ -922,11 +922,6 @@ export default function HomePage() {
                             }}
                           />
                           <span className="truncate flex-1">{c.summary}</span>
-                          {c.primary && (
-                            <span className="text-[10px] text-muted-foreground">
-                              primary
-                            </span>
-                          )}
                           <input
                             type="color"
                             value={calendarColors[c.id] || "#cbd5e1"}
@@ -937,7 +932,11 @@ export default function HomePage() {
                               };
                               setCalendarColors(next);
                             }}
-                            className="h-5 w-5 rounded border p-0"
+                            className="h-4 w-4 rounded-full border-0 p-0 cursor-pointer appearance-none bg-transparent [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch]:rounded-full"
+                            style={{
+                              backgroundColor:
+                                calendarColors[c.id] || "#cbd5e1",
+                            }}
                             aria-label={`Color for ${c.summary}`}
                             title={`Color for ${c.summary}`}
                           />
