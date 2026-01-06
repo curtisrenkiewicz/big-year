@@ -1,5 +1,6 @@
 "use client";
 import React, { useMemo } from "react";
+import Link from "next/link";
 import { cn, formatDateKey } from "@/lib/utils";
 import {
   Calendar as CalendarIcon,
@@ -881,6 +882,21 @@ export function YearCalendar({
             >
               Sign in with Google
             </Button>
+            <div className="mt-6 flex items-center justify-center gap-3 text-xs text-muted-foreground">
+              <Link
+                href="/privacy"
+                className="hover:text-foreground transition-colors"
+              >
+                Privacy Policy
+              </Link>
+              <span>•</span>
+              <Link
+                href="/terms"
+                className="hover:text-foreground transition-colors"
+              >
+                Terms of Service
+              </Link>
+            </div>
           </div>
         </div>
       )}

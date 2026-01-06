@@ -106,6 +106,7 @@ Make sure your OAuth consent screen is fully configured:
 ### Why This Happens
 
 The app requests `calendar.events` scope, which allows write access to calendars. Google considers this a **sensitive scope** and requires:
+
 - The app to be published (not in testing mode)
 - Proper OAuth consent screen configuration
 - Eventually, full verification for complete removal of warnings
@@ -200,6 +201,7 @@ To enable incremental authorization support:
 5. If there's an explicit option to enable it, turn it on
 
 **Alternative**: If incremental authorization isn't available or applicable (since this app needs all scopes from the start), you can:
+
 - Click "Learn how to fix it" in the Project Checkup alert for specific guidance
 - The alert may be informational rather than critical if your app legitimately needs all scopes upfront
 
