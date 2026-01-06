@@ -1021,7 +1021,7 @@ export default function HomePage() {
                 </>
               ) : (
                 <Button
-                  className="w-full"
+                  className="w-full justify-center"
                   onClick={() => {
                     setSidebarOpen(false);
                     signIn("google");
