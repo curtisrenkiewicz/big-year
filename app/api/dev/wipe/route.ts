@@ -13,6 +13,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Disabled" }, { status: 403 });
   }
 
+  // Require authentication for all wipe operations
+  const session = await getServerSession(authOptions);
+  const userId = (session as any)?.user?.id as string | undefined;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
+  }
+
   let body: any = {};
   try {
     body = await req.json();
@@ -20,11 +27,6 @@ export async function POST(req: Request) {
   const scope = body?.scope === "all" ? "all" : "current";
 
   if (scope === "current") {
-    const session = await getServerSession(authOptions);
-    const userId = (session as any)?.user?.id as string | undefined;
-    if (!userId) {
-      return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
-    }
     await prisma.session.deleteMany({ where: { userId } });
     await prisma.account.deleteMany({ where: { userId } });
     await prisma.user.deleteMany({ where: { id: userId } });
