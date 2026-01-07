@@ -26,6 +26,7 @@ export async function GET() {
           selectedCalendarIds: "[]",
           hiddenEventIds: "[]",
           showDaysOfWeek: true,
+          alignWeekends: false,
           showHidden: false,
           calendarColors: "{}",
         },
@@ -36,6 +37,7 @@ export async function GET() {
       selectedCalendarIds: JSON.parse(prefs.selectedCalendarIds),
       hiddenEventIds: JSON.parse(prefs.hiddenEventIds),
       showDaysOfWeek: prefs.showDaysOfWeek,
+      alignWeekends: prefs.alignWeekends ?? false,
       showHidden: prefs.showHidden,
       calendarColors: JSON.parse(prefs.calendarColors),
     });
@@ -62,6 +64,7 @@ export async function PUT(req: NextRequest) {
       selectedCalendarIds,
       hiddenEventIds,
       showDaysOfWeek,
+      alignWeekends,
       showHidden,
       calendarColors,
     } = body;
@@ -75,6 +78,9 @@ export async function PUT(req: NextRequest) {
     }
     if (showDaysOfWeek !== undefined) {
       updateData.showDaysOfWeek = showDaysOfWeek;
+    }
+    if (alignWeekends !== undefined) {
+      updateData.alignWeekends = Boolean(alignWeekends);
     }
     if (showHidden !== undefined) {
       updateData.showHidden = showHidden;
@@ -91,6 +97,7 @@ export async function PUT(req: NextRequest) {
         selectedCalendarIds: JSON.stringify(selectedCalendarIds || []),
         hiddenEventIds: JSON.stringify(hiddenEventIds || []),
         showDaysOfWeek: showDaysOfWeek ?? true,
+        alignWeekends: alignWeekends ?? false,
         showHidden: showHidden ?? false,
         calendarColors: JSON.stringify(calendarColors || {}),
       },
@@ -100,6 +107,7 @@ export async function PUT(req: NextRequest) {
       selectedCalendarIds: JSON.parse(prefs.selectedCalendarIds),
       hiddenEventIds: JSON.parse(prefs.hiddenEventIds),
       showDaysOfWeek: prefs.showDaysOfWeek,
+      alignWeekends: prefs.alignWeekends ?? false,
       showHidden: prefs.showHidden,
       calendarColors: JSON.parse(prefs.calendarColors),
     });
