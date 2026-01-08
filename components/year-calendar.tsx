@@ -7,6 +7,7 @@ import {
   X,
   MoreHorizontal,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -245,6 +246,11 @@ export function YearCalendar({
   const menuButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const editStartDateInputRef = React.useRef<HTMLInputElement | null>(null);
   const editEndDateInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [dragOffset, setDragOffset] = React.useState<number>(0);
+  const [isDragging, setIsDragging] = React.useState<boolean>(false);
+  const [isAnimatingIn, setIsAnimatingIn] = React.useState<boolean>(false);
+  const dragStartY = React.useRef<number>(0);
+  const dragStartOffset = React.useRef<number>(0);
 
   // Important for hydration: start with a deterministic server/client match,
   // then compute real columns after mount to avoid style mismatches.
@@ -421,11 +427,31 @@ export function YearCalendar({
   }, [popover.event, menuOpen]);
 
   React.useEffect(() => {
-    if (popover.event && !isEditing) {
+    if (popover.event) {
       // Initialize edit state when popover opens
       setEditTitle(popover.event.summary);
       setEditCalendarId(popover.event.calendarId || "");
       setEditStartDate(popover.event.startDate);
+
+      // Animate bottom sheet in from bottom on mobile
+      if (isMobile) {
+        setIsAnimatingIn(true);
+        setIsDragging(false);
+        // Start off-screen at bottom
+        setDragOffset(
+          typeof window !== "undefined" ? window.innerHeight : 1000
+        );
+        // Trigger animation to slide up after mount
+        const timeout = setTimeout(() => {
+          setDragOffset(0);
+          setTimeout(() => setIsAnimatingIn(false), 300);
+        }, 10);
+        return () => clearTimeout(timeout);
+      } else {
+        setDragOffset(0);
+        setIsDragging(false);
+        setIsAnimatingIn(false);
+      }
       // Check if event has an end date (endDate is exclusive, so if it's different from startDate + 1 day, it's a multi-day event)
       const start = new Date(popover.event.startDate + "T00:00:00Z");
       const end = new Date(popover.event.endDate + "T00:00:00Z");
@@ -445,7 +471,7 @@ export function YearCalendar({
         setEditEndDate("");
       }
     }
-  }, [popover.event, isEditing]);
+  }, [popover.event, isMobile]);
 
   function formatDisplayRange(startIsoDate: string, endIsoDate: string) {
     const start = new Date(startIsoDate + "T00:00:00");
@@ -667,6 +693,9 @@ export function YearCalendar({
                       height: laneHeight - 2,
                     }}
                     className="px-1 pointer-events-auto cursor-pointer"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       const rect = (
@@ -677,6 +706,7 @@ export function YearCalendar({
                         x: rect.left + rect.width / 2,
                         y: rect.bottom + 8,
                       });
+                      setIsEditing(true);
                     }}
                   >
                     <div
@@ -706,276 +736,110 @@ export function YearCalendar({
       </div>
       {popover.event && isEditing && (
         <>
-          <div
-            className="fixed inset-0 bg-background/60 z-40"
-            onClick={() => {
-              if (!isSubmitting) {
-                setIsEditing(false);
-              }
-            }}
-            aria-hidden
-          />
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
-            role="dialog"
-            aria-label="Edit event"
-          >
-            <div
-              ref={popoverRef}
-              className="rounded-md border bg-card shadow-lg pointer-events-auto w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-                <div className="font-semibold">Edit event</div>
-                <button
-                  className="text-muted-foreground hover:text-foreground flex-shrink-0 ml-2"
-                  onClick={() => setIsEditing(false)}
-                  disabled={isSubmitting}
-                  aria-label="Close"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-4 pt-2 pb-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <Plus className="h-4 w-4" />
-                  </div>
-                  <input
-                    className="flex-1 border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
-                    placeholder="Event title"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    disabled={isSubmitting}
-                    autoFocus
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <CalendarIcon className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 flex items-center justify-between">
-                    <div className="flex items-center">
-                      <input
-                        ref={editStartDateInputRef}
-                        type="date"
-                        className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 w-24 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-                        value={editStartDate}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setEditStartDate(v);
-                          if (
-                            editHasEndDate &&
-                            editEndDate &&
-                            v &&
-                            editEndDate < v
-                          ) {
-                            setEditEndDate(v);
-                          }
-                        }}
-                        onClick={(e) => {
-                          e.currentTarget.showPicker?.();
-                          e.currentTarget.focus();
-                        }}
-                        disabled={isSubmitting}
-                      />
-                      {editHasEndDate && (
-                        <>
-                          <span className="text-muted-foreground">–</span>
-                          <input
-                            ref={editEndDateInputRef}
-                            type="date"
-                            className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-                            value={editEndDate}
-                            min={editStartDate || undefined}
-                            onChange={(e) => setEditEndDate(e.target.value)}
-                            onClick={(e) => {
-                              e.currentTarget.showPicker?.();
-                              e.currentTarget.focus();
-                            }}
-                            disabled={isSubmitting}
-                          />
-                        </>
-                      )}
-                    </div>
-                    {editHasEndDate ? (
-                      <button
-                        type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setEditHasEndDate(false);
-                          setEditEndDate("");
-                        }}
-                        disabled={isSubmitting}
-                      >
-                        Remove
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setEditHasEndDate(true);
-                          if (!editEndDate) setEditEndDate(editStartDate);
-                        }}
-                        disabled={isSubmitting}
-                      >
-                        Add end date
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                    {editCalendarId && calendarColors[editCalendarId] ? (
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{
-                          backgroundColor: calendarColors[editCalendarId],
-                        }}
-                      />
-                    ) : (
-                      <div className="w-3 h-3 rounded-full bg-muted" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <Select
-                      value={editCalendarId}
-                      onValueChange={setEditCalendarId}
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger className="w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1">
-                        <SelectValue placeholder="Select a calendar">
-                          {editCalendarId && calendarNames[editCalendarId]
-                            ? calendarNames[editCalendarId]
-                            : "Select a calendar"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {writableAccountsWithCalendars.length > 0
-                          ? writableAccountsWithCalendars.map(
-                              ({ accountId, email, list }) => (
-                                <SelectGroup key={accountId || email}>
-                                  <SelectLabel>
-                                    {email && email.length
-                                      ? email
-                                      : accountId || "Account"}
-                                  </SelectLabel>
-                                  {list.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                      {c.summary}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              )
-                            )
-                          : writableCalendars.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {(c.accountEmail
-                                  ? `${c.accountEmail} — `
-                                  : "") + c.summary}
-                              </SelectItem>
-                            ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-              <div className="p-4 border-t flex items-center justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEditing(false)}
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={async () => {
-                    if (!popover.event || !onUpdateEvent) return;
-                    if (!editTitle.trim()) {
-                      alert("Title is required");
-                      return;
-                    }
-                    if (!editCalendarId) {
-                      alert("Calendar is required");
-                      return;
-                    }
-                    if (
-                      editHasEndDate &&
-                      editEndDate &&
-                      editEndDate < editStartDate
-                    ) {
-                      alert("End date must be on/after start date");
-                      return;
-                    }
-                    try {
-                      setIsSubmitting(true);
-                      await onUpdateEvent({
-                        id: popover.event.id,
-                        title: editTitle.trim(),
-                        calendarId: editCalendarId,
-                        startDate: editStartDate,
-                        endDate: editHasEndDate ? editEndDate : undefined,
-                      });
-                      setIsEditing(false);
-                      setPopover({ event: null, x: 0, y: 0 });
-                    } catch (err) {
-                      alert("Failed to update event");
-                    } finally {
-                      setIsSubmitting(false);
-                    }
-                  }}
-                  disabled={isSubmitting || !editTitle.trim()}
-                >
-                  {isSubmitting ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-      {popover.event && !isEditing && (
-        <>
           {isMobile && (
             <div
               className="fixed inset-0 bg-background/60 z-40"
-              onClick={() => setPopover({ event: null, x: 0, y: 0 })}
+              onClick={() => {
+                if (!isSubmitting) {
+                  setIsEditing(false);
+                  setPopover({ event: null, x: 0, y: 0 });
+                }
+              }}
               aria-hidden
             />
           )}
           <div
             ref={popoverRef}
             className={cn(
-              "fixed z-50 border bg-card shadow-lg",
+              "border bg-card shadow-lg pointer-events-auto z-50",
               isMobile
-                ? "bottom-0 left-0 right-0 w-full rounded-t-3xl rounded-b-none max-h-[80vh] overflow-y-auto"
-                : "w-56 max-w-[90vw] rounded-md"
+                ? "fixed bottom-0 left-0 right-0 w-full rounded-t-3xl rounded-b-none max-h-[80vh] overflow-y-auto transition-transform"
+                : "fixed rounded-md w-full max-w-md"
             )}
             style={
               isMobile
-                ? {}
-                : {
-                    top: popover.y,
-                    left: popover.x,
-                    transform: "translateX(-50%)",
+                ? {
+                    transform: `translateY(${Math.max(0, dragOffset)}px)`,
+                    transition: isDragging
+                      ? "none"
+                      : isAnimatingIn
+                      ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                      : "transform 0.3s ease-out",
                   }
+                : !isMobile && popover.x && popover.y
+                ? {
+                    top: `${popover.y}px`,
+                    left: `${popover.x}px`,
+                    transform: "translateX(-50%)",
+                    maxWidth: "400px",
+                  }
+                : {}
             }
             role="dialog"
-            aria-label="Event details"
+            aria-label="Edit event"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => {
+              if (!isMobile || isSubmitting) return;
+              const touch = e.touches[0];
+              const target = e.target as HTMLElement;
+              const bottomSheet = popoverRef.current;
+              if (!bottomSheet) return;
+
+              // Only allow dragging from the header area (first 60px or so)
+              const headerHeight = 60;
+              const scrollTop = bottomSheet.scrollTop;
+
+              if (
+                scrollTop === 0 &&
+                touch.clientY - bottomSheet.getBoundingClientRect().top <
+                  headerHeight
+              ) {
+                setIsDragging(true);
+                dragStartY.current = touch.clientY;
+                dragStartOffset.current = dragOffset;
+                e.preventDefault();
+              }
+            }}
+            onTouchMove={(e) => {
+              if (!isMobile || !isDragging || isSubmitting) return;
+              const touch = e.touches[0];
+              const deltaY = touch.clientY - dragStartY.current;
+              const newOffset = Math.max(0, dragStartOffset.current + deltaY);
+              setDragOffset(newOffset);
+              e.preventDefault();
+            }}
+            onTouchEnd={(e) => {
+              if (!isMobile || !isDragging) return;
+              setIsDragging(false);
+
+              // Dismiss if dragged down more than 100px or 20% of viewport height
+              const threshold = Math.min(100, window.innerHeight * 0.2);
+              if (dragOffset > threshold) {
+                setIsEditing(false);
+                setPopover({ event: null, x: 0, y: 0 });
+                setMenuOpen(false);
+                setMenuPosition(null);
+                // Reset after a delay to allow the dismiss animation
+                setTimeout(() => setDragOffset(0), 300);
+              } else {
+                // Snap back
+                setDragOffset(0);
+              }
+              e.preventDefault();
+            }}
           >
             <div
               className={cn(
-                "flex items-start justify-between gap-2",
-                isMobile ? "px-6 py-6" : "px-3 py-2"
+                "flex items-center justify-between",
+                isMobile ? "px-6 pt-6 pb-4" : "px-4 pt-4 pb-2"
               )}
             >
               <div
                 className={cn(
-                  "font-medium break-words flex-1 min-w-0",
-                  isMobile ? "text-xl" : "text-sm"
+                  isMobile ? "text-lg font-semibold" : "font-semibold"
                 )}
               >
-                {popover.event.summary}
+                Event
               </div>
               <div className="flex items-center gap-1">
                 <div className="relative" ref={menuRef}>
@@ -989,13 +853,10 @@ export function YearCalendar({
                           menuButtonRef.current.getBoundingClientRect();
                         const menuWidth = 192; // w-48 = 192px
                         const padding = 8;
-                        // Position menu to align with right edge of button, but ensure it stays within viewport
                         let left = rect.right - menuWidth;
-                        // Ensure menu doesn't go off the left edge
                         if (left < padding) {
                           left = padding;
                         }
-                        // Ensure menu doesn't go off the right edge
                         const maxLeft = window.innerWidth - menuWidth - padding;
                         if (left > maxLeft) {
                           left = maxLeft;
@@ -1031,22 +892,6 @@ export function YearCalendar({
                           : undefined
                       }
                     >
-                      {onUpdateEvent && writableCalendars.length > 0 && (
-                        <button
-                          className={cn(
-                            "w-full text-left px-3 py-1.5 hover:bg-accent hover:text-accent-foreground transition",
-                            isMobile ? "text-base" : "text-sm"
-                          )}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsEditing(true);
-                            setMenuOpen(false);
-                            setMenuPosition(null);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      )}
                       <button
                         className={cn(
                           "w-full text-left px-3 py-1.5 hover:bg-accent hover:text-accent-foreground transition",
@@ -1058,6 +903,7 @@ export function YearCalendar({
                             onHideEvent(popover.event.id);
                           }
                           setPopover({ event: null, x: 0, y: 0 });
+                          setIsEditing(false);
                           setMenuOpen(false);
                           setMenuPosition(null);
                         }}
@@ -1083,6 +929,7 @@ export function YearCalendar({
                               await onDeleteEvent(id);
                             } finally {
                               setPopover({ event: null, x: 0, y: 0 });
+                              setIsEditing(false);
                               setMenuOpen(false);
                               setMenuPosition(null);
                             }
@@ -1097,10 +944,12 @@ export function YearCalendar({
                 <button
                   className="text-muted-foreground hover:text-foreground flex-shrink-0 p-1"
                   onClick={() => {
+                    setIsEditing(false);
                     setPopover({ event: null, x: 0, y: 0 });
                     setMenuOpen(false);
                     setMenuPosition(null);
                   }}
+                  disabled={isSubmitting}
                   aria-label="Close"
                 >
                   <X className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
@@ -1109,45 +958,268 @@ export function YearCalendar({
             </div>
             <div
               className={cn(
-                "text-muted-foreground flex items-center gap-2",
-                isMobile ? "px-6 text-base" : "px-3 text-sm"
+                "space-y-3",
+                isMobile ? "px-6 pb-4" : "px-4 pt-2 pb-4"
               )}
             >
-              <CalendarIcon
-                className={cn(isMobile ? "h-5 w-5" : "h-2.5 w-2.5")}
-              />
-              <span>
-                {formatDisplayRange(
-                  popover.event.startDate,
-                  popover.event.endDate
-                )}
-              </span>
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                    isMobile ? "w-6 h-6" : "w-5 h-5"
+                  )}
+                >
+                  <Plus className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
+                </div>
+                <input
+                  className={cn(
+                    "flex-1 border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 placeholder:text-muted-foreground",
+                    isMobile ? "text-base" : "text-sm"
+                  )}
+                  placeholder="Event title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  disabled={isSubmitting}
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                    isMobile ? "w-6 h-6" : "w-5 h-5"
+                  )}
+                >
+                  <CalendarIcon
+                    className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")}
+                  />
+                </div>
+                <div className="flex-1 flex items-center justify-between">
+                  <div className="flex items-center">
+                    <input
+                      ref={editStartDateInputRef}
+                      type="date"
+                      className={cn(
+                        "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                        isMobile ? "text-base w-28" : "text-sm w-24"
+                      )}
+                      value={editStartDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEditStartDate(v);
+                        if (
+                          editHasEndDate &&
+                          editEndDate &&
+                          v &&
+                          editEndDate < v
+                        ) {
+                          setEditEndDate(v);
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.currentTarget.showPicker?.();
+                        e.currentTarget.focus();
+                      }}
+                      disabled={isSubmitting}
+                    />
+                    {editHasEndDate && (
+                      <>
+                        <span className="text-muted-foreground">–</span>
+                        <input
+                          ref={editEndDateInputRef}
+                          type="date"
+                          className={cn(
+                            "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                            isMobile ? "text-base w-28" : "text-sm"
+                          )}
+                          value={editEndDate}
+                          min={editStartDate || undefined}
+                          onChange={(e) => setEditEndDate(e.target.value)}
+                          onClick={(e) => {
+                            e.currentTarget.showPicker?.();
+                            e.currentTarget.focus();
+                          }}
+                          disabled={isSubmitting}
+                        />
+                      </>
+                    )}
+                  </div>
+                  {editHasEndDate ? (
+                    <div
+                      className={cn(
+                        "flex items-center",
+                        isMobile ? "gap-1" : ""
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className={cn(
+                          "text-muted-foreground hover:text-foreground flex-shrink-0",
+                          isMobile ? "p-1" : "text-xs"
+                        )}
+                        onClick={() => {
+                          setEditHasEndDate(false);
+                          setEditEndDate("");
+                        }}
+                        disabled={isSubmitting}
+                        aria-label="Remove end date"
+                      >
+                        {isMobile ? <Trash2 className="h-5 w-5" /> : "Remove"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className={cn(
+                        "text-muted-foreground hover:text-foreground",
+                        isMobile ? "text-sm" : "text-xs"
+                      )}
+                      onClick={() => {
+                        setEditHasEndDate(true);
+                        if (!editEndDate) setEditEndDate(editStartDate);
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      Add end date
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "flex-shrink-0 flex items-center justify-center",
+                    isMobile ? "w-6 h-6" : "w-5 h-5"
+                  )}
+                >
+                  {editCalendarId && calendarColors[editCalendarId] ? (
+                    <div
+                      className={cn(
+                        "rounded-full",
+                        isMobile ? "w-5 h-5" : "w-3 h-3"
+                      )}
+                      style={{
+                        backgroundColor: calendarColors[editCalendarId],
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className={cn(
+                        "rounded-full bg-muted",
+                        isMobile ? "w-5 h-5" : "w-3 h-3"
+                      )}
+                    />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <Select
+                    value={editCalendarId}
+                    onValueChange={setEditCalendarId}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1",
+                        isMobile ? "text-base" : "text-sm"
+                      )}
+                    >
+                      <SelectValue placeholder="Select a calendar">
+                        {editCalendarId && calendarNames[editCalendarId]
+                          ? calendarNames[editCalendarId]
+                          : "Select a calendar"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {writableAccountsWithCalendars.length > 0
+                        ? writableAccountsWithCalendars.map(
+                            ({ accountId, email, list }) => (
+                              <SelectGroup key={accountId || email}>
+                                <SelectLabel>
+                                  {email && email.length
+                                    ? email
+                                    : accountId || "Account"}
+                                </SelectLabel>
+                                {list.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.summary}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )
+                          )
+                        : writableCalendars.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {(c.accountEmail ? `${c.accountEmail} — ` : "") +
+                                c.summary}
+                            </SelectItem>
+                          ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
             <div
               className={cn(
-                "text-muted-foreground flex items-center gap-2",
-                isMobile
-                  ? "px-6 pb-6 text-base mt-4"
-                  : "px-3 pb-3 text-sm mt-1.5"
+                "flex gap-2 items-center",
+                isMobile ? "px-6 pb-6" : "px-4 pb-4 justify-end"
               )}
             >
-              <span
-                className={cn(
-                  "inline-block rounded-full",
-                  isMobile ? "h-5 w-5" : "h-2.5 w-2.5"
-                )}
-                style={{
-                  backgroundColor:
-                    (popover.event.calendarId &&
-                      calendarColors[popover.event.calendarId]) ||
-                    "hsl(var(--secondary))",
+              <Button
+                variant="outline"
+                className={cn(isMobile && "flex-1")}
+                onClick={() => {
+                  setIsEditing(false);
+                  setPopover({ event: null, x: 0, y: 0 });
+                  setMenuOpen(false);
+                  setMenuPosition(null);
                 }}
-              />
-              <span className="truncate">
-                {(popover.event.calendarId &&
-                  calendarNames[popover.event.calendarId]) ||
-                  "Calendar"}
-              </span>
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                className={cn(isMobile && "flex-1")}
+                onClick={async () => {
+                  if (!popover.event || !onUpdateEvent) return;
+                  if (!editTitle.trim()) {
+                    alert("Title is required");
+                    return;
+                  }
+                  if (!editCalendarId) {
+                    alert("Calendar is required");
+                    return;
+                  }
+                  if (
+                    editHasEndDate &&
+                    editEndDate &&
+                    editEndDate < editStartDate
+                  ) {
+                    alert("End date must be on/after start date");
+                    return;
+                  }
+                  try {
+                    setIsSubmitting(true);
+                    await onUpdateEvent({
+                      id: popover.event.id,
+                      title: editTitle.trim(),
+                      calendarId: editCalendarId,
+                      startDate: editStartDate,
+                      endDate: editHasEndDate ? editEndDate : undefined,
+                    });
+                    setIsEditing(false);
+                    setPopover({ event: null, x: 0, y: 0 });
+                    setMenuOpen(false);
+                    setMenuPosition(null);
+                  } catch (err) {
+                    alert("Failed to update event");
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }}
+                disabled={isSubmitting || !editTitle.trim()}
+              >
+                {isSubmitting ? "Saving…" : "Save"}
+              </Button>
             </div>
           </div>
         </>

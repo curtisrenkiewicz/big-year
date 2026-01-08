@@ -23,8 +23,9 @@ import {
   X,
   Clock,
   Calendar as CalendarIcon,
+  Trash2,
 } from "lucide-react";
-import { formatDateKey } from "@/lib/utils";
+import { formatDateKey, cn } from "@/lib/utils";
 import { CalendarListItem } from "@/types/calendar";
 
 type LinkedAccount = {
@@ -65,6 +66,13 @@ export default function HomePage() {
   const endDateInputRef = useRef<HTMLInputElement | null>(null);
   const preferencesLoaded = useRef<boolean>(false);
   const [preferencesLoadedState, setPreferencesLoadedState] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const createModalRef = useRef<HTMLDivElement | null>(null);
+  const [createDragOffset, setCreateDragOffset] = useState<number>(0);
+  const [createIsDragging, setCreateIsDragging] = useState<boolean>(false);
+  const [createIsAnimatingIn, setCreateIsAnimatingIn] = useState<boolean>(false);
+  const createDragStartY = useRef<number>(0);
+  const createDragStartOffset = useRef<number>(0);
 
   const mergeCalendarColorsWithDefaults = (
     calendars: CalendarListItem[],
@@ -257,6 +265,34 @@ export default function HomePage() {
       setPreferencesLoadedState(false);
     }
   }, [status]);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Animate create modal in from bottom on mobile
+  useEffect(() => {
+    if (createOpen && isMobile) {
+      setCreateIsAnimatingIn(true);
+      setCreateIsDragging(false);
+      setCreateDragOffset(typeof window !== "undefined" ? window.innerHeight : 1000);
+      const timeout = setTimeout(() => {
+        setCreateDragOffset(0);
+        setTimeout(() => setCreateIsAnimatingIn(false), 300);
+      }, 10);
+      return () => clearTimeout(timeout);
+    } else if (!createOpen) {
+      setCreateDragOffset(0);
+      setCreateIsDragging(false);
+      setCreateIsAnimatingIn(false);
+    }
+  }, [createOpen, isMobile]);
 
   // Handle calendar selection when both calendars and preferences are loaded
   // This runs when preferences finish loading (if calendars are already loaded)
@@ -656,44 +692,137 @@ export default function HomePage() {
       </div>
       {createOpen && (
         <>
+          {isMobile && (
+            <div
+              className="fixed inset-0 bg-background/60 z-40"
+              onClick={() => {
+                if (!createSubmitting) {
+                  setCreateOpen(false);
+                }
+              }}
+              aria-hidden
+            />
+          )}
           <div
-            className="fixed inset-0 bg-background/60 z-40"
-            onClick={() => {
-              if (!createSubmitting) {
-                setCreateOpen(false);
-              }
-            }}
-            aria-hidden
-          />
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            ref={createModalRef}
+            className={cn(
+              "border bg-card shadow-lg pointer-events-auto z-50",
+              isMobile
+                ? "fixed bottom-0 left-0 right-0 w-full rounded-t-3xl rounded-b-none max-h-[80vh] overflow-y-auto transition-transform"
+                : "fixed rounded-md w-full max-w-md"
+            )}
+            style={
+              isMobile
+                ? {
+                    transform: `translateY(${Math.max(0, createDragOffset)}px)`,
+                    transition: createIsDragging
+                      ? "none"
+                      : createIsAnimatingIn
+                        ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                        : "transform 0.3s ease-out",
+                  }
+                : {
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    maxWidth: "400px",
+                  }
+            }
             role="dialog"
             aria-label="Create event"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => {
+              if (!isMobile || createSubmitting) return;
+              const touch = e.touches[0];
+              const target = e.target as HTMLElement;
+              const bottomSheet = createModalRef.current;
+              if (!bottomSheet) return;
+
+              const headerHeight = 80;
+              const rect = bottomSheet.getBoundingClientRect();
+              const touchY = touch.clientY - rect.top;
+              const scrollTop = bottomSheet.scrollTop;
+
+              const isInHeader = touchY < headerHeight && scrollTop === 0;
+              const isHeaderElement =
+                target.closest('[aria-label="Close"]') ||
+                target.closest("button[class*='p-1']");
+
+              if (isInHeader || (scrollTop === 0 && isHeaderElement)) {
+                setCreateIsDragging(true);
+                createDragStartY.current = touch.clientY;
+                createDragStartOffset.current = createDragOffset;
+                if (!isHeaderElement) {
+                  e.preventDefault();
+                }
+              }
+            }}
+            onTouchMove={(e) => {
+              if (!isMobile || !createIsDragging || createSubmitting) return;
+              const touch = e.touches[0];
+              const deltaY = touch.clientY - createDragStartY.current;
+              const newOffset = Math.max(0, createDragStartOffset.current + deltaY);
+              setCreateDragOffset(newOffset);
+              e.preventDefault();
+            }}
+            onTouchEnd={(e) => {
+              if (!isMobile || !createIsDragging) return;
+              setCreateIsDragging(false);
+
+              const threshold = Math.min(100, window.innerHeight * 0.2);
+              if (createDragOffset > threshold) {
+                setCreateOpen(false);
+                setTimeout(() => setCreateDragOffset(0), 300);
+              } else {
+                setCreateDragOffset(0);
+              }
+              e.preventDefault();
+            }}
           >
-            <div
-              className="w-full max-w-md rounded-md border bg-card shadow-lg pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-                <div className="font-semibold">Create event</div>
-                <button
-                  className="text-muted-foreground hover:text-foreground flex-shrink-0 ml-2"
-                  onClick={() =>
-                    createSubmitting ? null : setCreateOpen(false)
-                  }
-                  aria-label="Close"
-                  disabled={createSubmitting}
-                >
-                  <X className="h-4 w-4" />
-                </button>
+          <div
+            className={cn(
+              "flex items-center justify-between",
+              isMobile ? "px-6 pt-6 pb-4" : "px-4 pt-4 pb-2"
+            )}
+          >
+              <div
+                className={cn(
+                  isMobile ? "text-lg font-semibold" : "font-semibold"
+                )}
+              >
+                Event
               </div>
-              <div className="px-4 pt-2 pb-4 space-y-3">
+              <button
+                className="text-muted-foreground hover:text-foreground flex-shrink-0 p-1"
+                onClick={() =>
+                  createSubmitting ? null : setCreateOpen(false)
+                }
+                aria-label="Close"
+                disabled={createSubmitting}
+              >
+                <X className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
+              </button>
+          </div>
+          <div
+            className={cn(
+              "space-y-3",
+              isMobile ? "px-6 pb-4" : "px-4 pt-2 pb-4"
+            )}
+          >
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <Plus className="h-4 w-4" />
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
+                    <Plus className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
                   </div>
                   <input
-                    className="flex-1 border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
+                    className={cn(
+                      "flex-1 border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 placeholder:text-muted-foreground",
+                      isMobile ? "text-base" : "text-sm"
+                    )}
                     placeholder="Event title"
                     value={createTitle}
                     onChange={(e) => setCreateTitle(e.target.value)}
@@ -702,15 +831,25 @@ export default function HomePage() {
                   />
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <CalendarIcon className="h-4 w-4" />
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
+                    <CalendarIcon
+                      className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")}
+                    />
                   </div>
                   <div className="flex-1 flex items-center justify-between">
                     <div className="flex items-center">
                       <input
                         ref={startDateInputRef}
                         type="date"
-                        className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 w-24 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                        className={cn(
+                          "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                          isMobile ? "text-base w-28" : "text-sm w-24"
+                        )}
                         value={createStartDate}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -736,7 +875,10 @@ export default function HomePage() {
                           <input
                             ref={endDateInputRef}
                             type="date"
-                            className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                            className={cn(
+                              "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                              isMobile ? "text-base w-28" : "text-sm"
+                            )}
                             value={createEndDate}
                             min={createStartDate || undefined}
                             onChange={(e) => setCreateEndDate(e.target.value)}
@@ -752,19 +894,30 @@ export default function HomePage() {
                     {createHasEndDate ? (
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        className={cn(
+                          "text-muted-foreground hover:text-foreground flex-shrink-0",
+                          isMobile ? "p-1" : "text-xs"
+                        )}
                         onClick={() => {
                           setCreateHasEndDate(false);
                           setCreateEndDate("");
                         }}
                         disabled={createSubmitting}
+                        aria-label="Remove end date"
                       >
-                        Remove
+                        {isMobile ? (
+                          <Trash2 className="h-5 w-5" />
+                        ) : (
+                          "Remove"
+                        )}
                       </button>
                     ) : (
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        className={cn(
+                          "text-muted-foreground hover:text-foreground",
+                          isMobile ? "text-sm" : "text-xs"
+                        )}
                         onClick={() => {
                           setCreateHasEndDate(true);
                           if (!createEndDate) setCreateEndDate(createStartDate);
@@ -777,16 +930,29 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
                     {createCalendarId && calendarColors[createCalendarId] ? (
                       <div
-                        className="w-3 h-3 rounded-full"
+                        className={cn(
+                          "rounded-full",
+                          isMobile ? "w-5 h-5" : "w-3 h-3"
+                        )}
                         style={{
                           backgroundColor: calendarColors[createCalendarId],
                         }}
                       />
                     ) : (
-                      <div className="w-3 h-3 rounded-full bg-muted" />
+                      <div
+                        className={cn(
+                          "rounded-full bg-muted",
+                          isMobile ? "w-5 h-5" : "w-3 h-3"
+                        )}
+                      />
                     )}
                   </div>
                   <div className="flex-1">
@@ -795,7 +961,12 @@ export default function HomePage() {
                       onValueChange={setCreateCalendarId}
                       disabled={createSubmitting}
                     >
-                      <SelectTrigger className="w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1">
+                      <SelectTrigger
+                        className={cn(
+                          "w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1",
+                          isMobile ? "text-base" : "text-sm"
+                        )}
+                      >
                         <SelectValue placeholder="Select a calendar" />
                       </SelectTrigger>
                       <SelectContent>
@@ -828,37 +999,53 @@ export default function HomePage() {
                   </div>
                 </div>
                 {writableCalendars.length === 0 && calendars.length > 0 && (
-                  <div className="text-xs text-muted-foreground pl-8">
+                  <div
+                    className={cn(
+                      "text-muted-foreground",
+                      isMobile ? "text-sm pl-8" : "text-xs pl-8"
+                    )}
+                  >
                     No writable calendars found; creating may fail on read-only
                     calendars.
                   </div>
                 )}
                 {createError && (
-                  <div className="text-sm text-destructive pl-8">
+                  <div
+                    className={cn(
+                      "text-destructive",
+                      isMobile ? "text-base pl-8" : "text-sm pl-8"
+                    )}
+                  >
                     {createError}
                   </div>
                 )}
-              </div>
-              <div className="p-4 border-t flex items-center justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setCreateOpen(false)}
-                  disabled={createSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={onCreateEvent}
-                  disabled={
-                    createSubmitting ||
-                    status !== "authenticated" ||
-                    !createTitle.trim()
-                  }
-                >
-                  {createSubmitting ? "Creating…" : "Create"}
-                </Button>
-              </div>
-            </div>
+          </div>
+          <div
+            className={cn(
+              "flex gap-2 items-center",
+              isMobile ? "px-6 pb-6" : "px-4 pb-4 justify-end"
+            )}
+          >
+            <Button
+              variant="outline"
+              className={cn(isMobile && "flex-1")}
+              onClick={() => setCreateOpen(false)}
+              disabled={createSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              className={cn(isMobile && "flex-1")}
+              onClick={onCreateEvent}
+              disabled={
+                createSubmitting ||
+                status !== "authenticated" ||
+                !createTitle.trim()
+              }
+            >
+              {createSubmitting ? "Creating…" : "Create"}
+            </Button>
+          </div>
           </div>
         </>
       )}
@@ -1158,3 +1345,4 @@ export default function HomePage() {
     </div>
   );
 }
+
