@@ -7,6 +7,8 @@ import {
   X,
   MoreHorizontal,
   Plus,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AllDayEvent, CalendarListItem } from "@/types/calendar";
+import { AllDayEvent, CalendarListItem, CalendarViewType } from "@/types/calendar";
 
 export type { AllDayEvent, CalendarListItem };
 function expandEventsToDateMap(events: AllDayEvent[]) {
@@ -51,6 +53,15 @@ function generateYearDays(year: number) {
   const end = new Date(year + 1, 0, 1);
   const days: Array<{ key: string; date: Date }> = [];
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+    const date = new Date(d);
+    days.push({ key: formatDateKey(date), date });
+  }
+  return days;
+}
+
+function generateDaysForRange(startDate: Date, endDate: Date) {
+  const days: Array<{ key: string; date: Date }> = [];
+  for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
     const date = new Date(d);
     days.push({ key: formatDateKey(date), date });
   }
@@ -127,6 +138,9 @@ function hexToRgba(hex: string, alpha = 0.35) {
 
 export function YearCalendar({
   year,
+  viewType = "year",
+  startDate,
+  endDate,
   events,
   signedIn,
   calendarColors = {},
@@ -139,8 +153,12 @@ export function YearCalendar({
   writableCalendars = [],
   writableAccountsWithCalendars = [],
   showDaysOfWeek = false,
+  onNavigateToEvent,
 }: {
   year: number;
+  viewType?: CalendarViewType;
+  startDate?: Date;
+  endDate?: Date;
   events: AllDayEvent[];
   signedIn: boolean;
   calendarColors?: Record<string, string>;
@@ -163,13 +181,25 @@ export function YearCalendar({
     list: CalendarListItem[];
   }>;
   showDaysOfWeek?: boolean;
+  onNavigateToEvent?: (targetDate: string) => void;
 }) {
   const todayKey = formatDateKey(new Date());
   const dateMap = useMemo(() => expandEventsToDateMap(events), [events]);
-  const days = useMemo(() => generateYearDays(year), [year]);
+  const days = useMemo(() => {
+    if (viewType === "year") {
+      return generateYearDays(year);
+    } else if (startDate && endDate) {
+      return generateDaysForRange(startDate, endDate);
+    } else {
+      return generateYearDays(year);
+    }
+  }, [year, viewType, startDate, endDate]);
   const dayIndexByKey = useMemo(() => {
     const map = new Map<string, number>();
     days.forEach((d, i) => map.set(d.key, i));
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'year-calendar.tsx:196',message:'dayIndexByKey constructed',data:{daysLength:days.length,firstKey:days[0]?.key,lastKey:days[days.length-1]?.key,viewType,startDate:startDate?.toISOString(),endDate:endDate?.toISOString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     return map;
   }, [days]);
   const gridRef = React.useRef<HTMLDivElement | null>(null);
@@ -410,10 +440,61 @@ export function YearCalendar({
               ev: AllDayEvent;
             };
             const rowToSegs = new Map<number, Seg[]>();
+            const firstDayDate = days.length > 0 ? days[0].date : null;
+            const lastDayDate = days.length > 0 ? days[days.length - 1].date : null;
             for (const ev of events) {
-              const startIdx = dayIndexByKey.get(ev.startDate);
-              const endIdxExclusive = dayIndexByKey.get(ev.endDate);
-              if (startIdx == null || endIdxExclusive == null) continue;
+              // #region agent log
+              fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'year-calendar.tsx:441',message:'Event processing start',data:{eventId:ev.id,summary:ev.summary,startDate:ev.startDate,endDate:ev.endDate,daysLength:days.length,viewType,firstDayKey:days[0]?.key,lastDayKey:days[days.length-1]?.key},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
+              let startIdx = dayIndexByKey.get(ev.startDate);
+              let endIdxExclusive = dayIndexByKey.get(ev.endDate);
+              
+              // #region agent log
+              fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'year-calendar.tsx:444',message:'After dayIndexByKey lookup',data:{startIdx,endIdxExclusive,startDateFound:startIdx!=null,endDateFound:endIdxExclusive!=null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+              // #endregion
+              
+              // If both dates are outside the view, skip the event entirely
+              if (startIdx == null && endIdxExclusive == null) {
+                continue;
+              }
+              
+              // Calculate if this is a single-day event
+              const evStartDate = new Date(ev.startDate + "T00:00:00Z");
+              const evEndDate = new Date(ev.endDate + "T00:00:00Z");
+              const daysDiff = Math.round((evEndDate.getTime() - evStartDate.getTime()) / (1000 * 60 * 60 * 24));
+              const isSingleDay = daysDiff === 1;
+              
+              // Clamp indices to view bounds
+              if (startIdx == null) {
+                // Event starts before view, clamp to start
+                startIdx = 0;
+              }
+              if (endIdxExclusive == null) {
+                // Event ends after view
+                if (isSingleDay && startIdx != null) {
+                  // For single-day events, if startDate is in view, event should only span 1 day
+                  endIdxExclusive = startIdx + 1;
+                } else {
+                  // For multi-day events or when startDate is also outside, clamp to end
+                  endIdxExclusive = days.length;
+                }
+                // #region agent log
+                fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'year-calendar.tsx:460',message:'endIdxExclusive is null, clamping',data:{startIdx,daysLength:days.length,daysDiff,isSingleDay,endIdxExclusive,startDate:ev.startDate,endDate:ev.endDate},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
+              }
+              
+              // #region agent log
+              fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'year-calendar.tsx:470',message:'Final indices before segment creation',data:{startIdx,endIdxExclusive,span:endIdxExclusive-startIdx},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
+              
+              // Track if event extends beyond view range
+              // endDate is exclusive, so compare with the day before the endDate
+              // (evStartDate and evEndDate are already defined above)
+              const extendsBefore = firstDayDate && evStartDate < firstDayDate;
+              // Since endDate is exclusive, if evEndDate > lastDayDate + 1 day, it extends after
+              const lastDayPlusOne = lastDayDate ? new Date(lastDayDate.getTime() + 86400000) : null;
+              const extendsAfter = lastDayPlusOne && evEndDate > lastDayPlusOne;
+              
               let segStart = startIdx;
               while (segStart < endIdxExclusive) {
                 const row = Math.floor(segStart / cols);
@@ -425,7 +506,16 @@ export function YearCalendar({
                 const endCol =
                   rowEndExclusive % cols === 0 ? cols : rowEndExclusive % cols; // 1..cols inclusive
                 const list = rowToSegs.get(row) ?? [];
-                list.push({ row, startCol, endCol, ev });
+                list.push({ 
+                  row, 
+                  startCol, 
+                  endCol, 
+                  ev: {
+                    ...ev,
+                    _extendsBefore: extendsBefore,
+                    _extendsAfter: extendsAfter,
+                  } as AllDayEvent & { _extendsBefore?: boolean; _extendsAfter?: boolean }
+                });
                 rowToSegs.set(row, list);
                 segStart = rowEndExclusive;
               }
@@ -463,6 +553,10 @@ export function YearCalendar({
                 const bg = seg.ev.calendarId
                   ? calendarColors[seg.ev.calendarId]
                   : undefined;
+                const extendsBefore = (seg.ev as any)._extendsBefore;
+                const extendsAfter = (seg.ev as any)._extendsAfter;
+                const chevronSize = 8;
+                
                 bars.push(
                   <div
                     key={key}
@@ -473,8 +567,12 @@ export function YearCalendar({
                       width,
                       height: laneHeight - 2,
                     }}
-                    className="px-1 pointer-events-auto cursor-pointer"
+                    className="px-1 pointer-events-auto cursor-pointer flex items-center"
                     onClick={(e) => {
+                      // Don't trigger popover if clicking on chevron
+                      if ((e.target as HTMLElement).closest('.event-chevron')) {
+                        return;
+                      }
                       e.stopPropagation();
                       const rect = (
                         e.currentTarget as HTMLDivElement
@@ -487,15 +585,54 @@ export function YearCalendar({
                     }}
                   >
                     <div
-                      className="truncate rounded-sm px-1 text-[10px] leading-[14px] shadow-sm"
+                      className="truncate rounded-sm px-1 text-[10px] leading-[14px] shadow-sm relative overflow-hidden flex items-center"
                       style={{
                         backgroundColor: bg || "hsl(var(--secondary))",
                         color: "#ffffff",
                         height: laneHeight - 2,
                         lineHeight: `${laneHeight - 4}px`,
+                        width: "100%",
                       }}
                     >
-                      {seg.ev.summary}
+                      {extendsBefore && onNavigateToEvent && (
+                        <button
+                          className="event-chevron flex-shrink-0 mr-0.5 pointer-events-auto hover:opacity-80 transition-opacity rounded"
+                          style={{
+                            width: chevronSize,
+                            height: chevronSize,
+                            color: "#ffffff",
+                            backgroundColor: bg || "hsl(var(--secondary))",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigateToEvent(seg.ev.startDate);
+                          }}
+                          aria-label="Navigate to event start"
+                          title="View beginning of event"
+                        >
+                          <ChevronLeft className="w-full h-full" />
+                        </button>
+                      )}
+                      <span className="truncate flex-1">{seg.ev.summary}</span>
+                      {extendsAfter && onNavigateToEvent && (
+                        <button
+                          className="event-chevron flex-shrink-0 ml-0.5 pointer-events-auto hover:opacity-80 transition-opacity rounded"
+                          style={{
+                            width: chevronSize,
+                            height: chevronSize,
+                            color: "#ffffff",
+                            backgroundColor: bg || "hsl(var(--secondary))",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigateToEvent(seg.ev.endDate);
+                          }}
+                          aria-label="Navigate to event end"
+                          title="View rest of event"
+                        >
+                          <ChevronRight className="w-full h-full" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -508,6 +645,8 @@ export function YearCalendar({
             gridDims.cols,
             cellSizePx,
             calendarColors,
+            days,
+            onNavigateToEvent,
           ])}
         </div>
       </div>

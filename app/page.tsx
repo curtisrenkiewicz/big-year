@@ -3,15 +3,7 @@ import { useSession, signIn, signOut } from "next-auth/react";
 import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { YearCalendar, AllDayEvent } from "@/components/year-calendar";
 import {
   ChevronLeft,
@@ -25,7 +17,7 @@ import {
   Calendar as CalendarIcon,
 } from "lucide-react";
 import { formatDateKey } from "@/lib/utils";
-import { CalendarListItem } from "@/types/calendar";
+import { CalendarListItem, CalendarViewType } from "@/types/calendar";
 
 type LinkedAccount = {
   accountId: string;
@@ -34,9 +26,53 @@ type LinkedAccount = {
   error?: string;
 };
 
+function calculateViewRange(
+  viewType: CalendarViewType,
+  year: number,
+  startDate?: Date | null
+): { start: Date; end: Date } {
+    if (viewType === "year") {
+      return {
+        start: new Date(year, 0, 1),
+        end: new Date(year + 1, 0, 1),
+      };
+    }
+
+    const now = new Date();
+    let baseDate: Date;
+    
+    if (startDate) {
+      baseDate = new Date(startDate);
+    } else if (viewType === "3month" || viewType === "6month") {
+      baseDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      baseDate = new Date(year, 0, 1);
+    }
+
+    const baseYear = baseDate.getFullYear();
+    const baseMonth = baseDate.getMonth();
+
+    if (viewType === "3month") {
+      const start = new Date(baseYear, baseMonth, 1);
+      const end = new Date(baseYear, baseMonth + 3, 1);
+      return { start, end };
+    } else if (viewType === "6month") {
+      const start = new Date(baseYear, baseMonth, 1);
+      const end = new Date(baseYear, baseMonth + 6, 1);
+      return { start, end };
+    }
+
+    return {
+      start: new Date(year, 0, 1),
+      end: new Date(year + 1, 0, 1),
+    };
+}
+
 export default function HomePage() {
   const { data: session, status } = useSession();
   const [year, setYear] = useState<number>(new Date().getFullYear());
+  const [viewType, setViewType] = useState<CalendarViewType>("year");
+  const [viewStartDate, setViewStartDate] = useState<Date | null>(null);
   const [events, setEvents] = useState<AllDayEvent[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [calendars, setCalendars] = useState<CalendarListItem[]>([]);
@@ -63,6 +99,10 @@ export default function HomePage() {
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const endDateInputRef = useRef<HTMLInputElement | null>(null);
   const preferencesLoaded = useRef<boolean>(false);
+
+  const viewRange = useMemo(() => {
+    return calculateViewRange(viewType, year, viewStartDate);
+  }, [viewType, year, viewStartDate]);
 
   const mergeCalendarColorsWithDefaults = (
     calendars: CalendarListItem[],
@@ -239,6 +279,15 @@ export default function HomePage() {
           if (data.calendarColors !== undefined) {
             setCalendarColors(data.calendarColors);
           }
+          if (data.viewType !== undefined) {
+            setViewType(data.viewType);
+            if (data.viewType !== "year") {
+              const now = new Date();
+              const range = calculateViewRange(data.viewType, now.getFullYear(), null);
+              setViewStartDate(range.start);
+              setYear(range.start.getFullYear());
+            }
+          }
         })
         .catch((err) => {
           console.error("Failed to load preferences:", err);
@@ -260,16 +309,40 @@ export default function HomePage() {
       return;
     }
     const controller = new AbortController();
-    const qs = `/api/events?year=${year}${
-      selectedCalendarIds.length
-        ? `&calendarIds=${encodeURIComponent(selectedCalendarIds.join(","))}`
-        : ""
-    }`;
-    fetch(qs, { cache: "no-store", signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
+    const range = viewRange;
+    const startYear = range.start.getFullYear();
+    const endYear = range.end.getFullYear();
+    const yearsToFetch = Array.from(
+      new Set([startYear, endYear])
+    );
+    Promise.all(
+      yearsToFetch.map((y) =>
+        fetch(
+          `/api/events?year=${y}${
+            selectedCalendarIds.length
+              ? `&calendarIds=${encodeURIComponent(selectedCalendarIds.join(","))}`
+              : ""
+          }`,
+          { cache: "no-store", signal: controller.signal }
+        )
+          .then((res) => res.json())
+          .then((data) => data.events || [])
+      )
+    )
+      .then((eventsArrays) => {
         if (!controller.signal.aborted) {
-          setEvents(data.events || []);
+          const allEvents = eventsArrays.flat() as AllDayEvent[];
+          const filteredEvents = allEvents.filter((ev) => {
+            const evStart = new Date(ev.startDate + "T00:00:00Z");
+            const evEnd = new Date(ev.endDate + "T00:00:00Z");
+            const daysDiff = Math.round((evEnd.getTime() - evStart.getTime()) / (1000 * 60 * 60 * 24));
+            const passes = evStart < range.end && evEnd > range.start;
+            // #region agent log
+            fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:343',message:'Event filtering',data:{eventId:ev.id,summary:ev.summary,startDate:ev.startDate,endDate:ev.endDate,daysDiff,isSingleDay:daysDiff===1,passes,rangeStart:range.start.toISOString(),rangeEnd:range.end.toISOString(),viewType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+            return passes;
+          });
+          setEvents(filteredEvents);
         }
       })
       .catch((err) => {
@@ -278,7 +351,7 @@ export default function HomePage() {
         }
       });
     return () => controller.abort();
-  }, [status, year, selectedCalendarIds]);
+  }, [status, viewRange, selectedCalendarIds]);
 
   useEffect(() => {
     if (status !== "authenticated") {
@@ -403,6 +476,36 @@ export default function HomePage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [createOpen, createSubmitting]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      
+      if (isInput) return;
+      
+      if (e.key === "1") {
+        e.preventDefault();
+        setViewType("year");
+        setViewStartDate(null);
+        setYear(new Date().getFullYear());
+      } else if (e.key === "2") {
+        e.preventDefault();
+        const range = calculateViewRange("6month", year, null);
+        setViewType("6month");
+        setViewStartDate(range.start);
+        setYear(range.start.getFullYear());
+      } else if (e.key === "3") {
+        e.preventDefault();
+        const range = calculateViewRange("3month", year, null);
+        setViewType("3month");
+        setViewStartDate(range.start);
+        setYear(range.start.getFullYear());
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [year]);
+
   // Persist preferences to server whenever they change
   useEffect(() => {
     if (status === "authenticated" && preferencesLoaded.current) {
@@ -417,6 +520,7 @@ export default function HomePage() {
             showDaysOfWeek,
             showHidden,
             calendarColors,
+            viewType,
           }),
         }).catch((err) => {
           console.error("Failed to save preferences:", err);
@@ -431,10 +535,78 @@ export default function HomePage() {
     showDaysOfWeek,
     showHidden,
     calendarColors,
+    viewType,
   ]);
 
-  const onPrev = () => setYear((y) => y - 1);
-  const onNext = () => setYear((y) => y + 1);
+  const onPrev = () => {
+    if (viewType === "year") {
+      setYear((y) => y - 1);
+    } else {
+      const range = calculateViewRange(viewType, year, viewStartDate);
+      const newStart = new Date(range.start);
+      if (viewType === "3month") {
+        newStart.setMonth(newStart.getMonth() - 3);
+      } else if (viewType === "6month") {
+        newStart.setMonth(newStart.getMonth() - 6);
+      }
+      setViewStartDate(newStart);
+      setYear(newStart.getFullYear());
+    }
+  };
+
+  const onNext = () => {
+    if (viewType === "year") {
+      setYear((y) => y + 1);
+    } else {
+      const range = calculateViewRange(viewType, year, viewStartDate);
+      const newStart = new Date(range.start);
+      if (viewType === "3month") {
+        newStart.setMonth(newStart.getMonth() + 3);
+      } else if (viewType === "6month") {
+        newStart.setMonth(newStart.getMonth() + 6);
+      }
+      setViewStartDate(newStart);
+      setYear(newStart.getFullYear());
+    }
+  };
+
+  const onViewTypeChange = (newViewType: CalendarViewType) => {
+    setViewType(newViewType);
+    const now = new Date();
+    if (newViewType === "year") {
+      setViewStartDate(null);
+      setYear(now.getFullYear());
+    } else {
+      const range = calculateViewRange(newViewType, year, null);
+      setViewStartDate(range.start);
+      setYear(range.start.getFullYear());
+    }
+  };
+
+  const onNavigateToEvent = (targetDateStr: string) => {
+    const targetDate = new Date(targetDateStr + "T00:00:00Z");
+    const targetYear = targetDate.getFullYear();
+    const targetMonth = targetDate.getMonth();
+
+    if (viewType === "year") {
+      setYear(targetYear);
+      setViewStartDate(null);
+    } else if (viewType === "3month") {
+      // Find the 3-month period that contains the target date
+      // Align to 3-month boundaries (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
+      const quarterStartMonth = Math.floor(targetMonth / 3) * 3;
+      const newStart = new Date(targetYear, quarterStartMonth, 1);
+      setViewStartDate(newStart);
+      setYear(targetYear);
+    } else if (viewType === "6month") {
+      // Find the 6-month period that contains the target date
+      // Align to 6-month boundaries (Jan-Jun, Jul-Dec)
+      const halfStartMonth = Math.floor(targetMonth / 6) * 6;
+      const newStart = new Date(targetYear, halfStartMonth, 1);
+      setViewStartDate(newStart);
+      setYear(targetYear);
+    }
+  };
   const onRefresh = async () => {
     if (status !== "authenticated") {
       setEvents([]);
@@ -465,15 +637,31 @@ export default function HomePage() {
         calendarColors
       );
       setCalendarColors(nextColors);
-      // 2) Reload events for the current year using the merged selection
-      const qs = `/api/events?year=${year}${
-        mergedSelected.length
-          ? `&calendarIds=${encodeURIComponent(mergedSelected.join(","))}`
-          : ""
-      }`;
-      const eventsRes = await fetch(qs, { cache: "no-store" });
-      const eventsData = await eventsRes.json();
-      setEvents(eventsData.events || []);
+      // 2) Reload events for the current view range using the merged selection
+      const range = viewRange;
+      const startYear = range.start.getFullYear();
+      const endYear = range.end.getFullYear();
+      const yearsToFetch = Array.from(new Set([startYear, endYear]));
+      const eventsPromises = yearsToFetch.map((y) =>
+        fetch(
+          `/api/events?year=${y}${
+            mergedSelected.length
+              ? `&calendarIds=${encodeURIComponent(mergedSelected.join(","))}`
+              : ""
+          }`,
+          { cache: "no-store" }
+        )
+          .then((res) => res.json())
+          .then((data) => data.events || [])
+      );
+      const eventsArrays = await Promise.all(eventsPromises);
+      const allEvents = eventsArrays.flat() as AllDayEvent[];
+      const filteredEvents = allEvents.filter((ev) => {
+        const evStart = new Date(ev.startDate + "T00:00:00Z");
+        const evEnd = new Date(ev.endDate + "T00:00:00Z");
+        return evStart < range.end && evEnd > range.start;
+      });
+      setEvents(filteredEvents);
     } catch {
       // keep existing events on failure
     } finally {
@@ -560,24 +748,62 @@ export default function HomePage() {
             size="icon"
             className="hover:bg-transparent"
             onClick={onPrev}
-            aria-label="Previous year"
+            aria-label={
+              viewType === "year"
+                ? "Previous year"
+                : viewType === "6month"
+                ? "Previous 6 months"
+                : "Previous 3 months"
+            }
           >
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <div className="font-semibold text-lg min-w-[5ch] text-center leading-none">
-            {year}
+            {viewType === "year" ? (
+              year
+            ) : (
+              <div className="text-sm whitespace-nowrap">
+                {(() => {
+                  const start = viewRange.start;
+                  const end = new Date(viewRange.end.getTime() - 86400000);
+                  const startYear = start.getFullYear();
+                  const endYear = end.getFullYear();
+                  const startMonth = start.toLocaleDateString(undefined, { month: "short" });
+                  const endMonth = end.toLocaleDateString(undefined, { month: "short" });
+                  
+                  if (startYear === endYear) {
+                    return `${startMonth}-${endMonth} ${startYear.toString().slice(-2)}`;
+                  } else {
+                    return `${startMonth} ${startYear.toString().slice(-2)} - ${endMonth} ${endYear.toString().slice(-2)}`;
+                  }
+                })()}
+              </div>
+            )}
           </div>
           <Button
             variant="ghost"
             size="icon"
             className="hover:bg-transparent"
             onClick={onNext}
-            aria-label="Next year"
+            aria-label={
+              viewType === "year"
+                ? "Next year"
+                : viewType === "6month"
+                ? "Next 6 months"
+                : "Next 3 months"
+            }
           >
             <ChevronRight className="h-5 w-5" />
           </Button>
         </div>
         <div className="flex items-center justify-end gap-2">
+          <Tabs value={viewType} onValueChange={(value) => onViewTypeChange(value as CalendarViewType)}>
+            <TabsList>
+              <TabsTrigger value="3month">3m</TabsTrigger>
+              <TabsTrigger value="6month">6m</TabsTrigger>
+              <TabsTrigger value="year">1y</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <Button
             variant="outline"
             className="gap-2 rounded-full justify-center"
@@ -1037,6 +1263,9 @@ export default function HomePage() {
       <div className="flex-1 min-h-0">
         <YearCalendar
           year={year}
+          viewType={viewType}
+          startDate={viewRange.start}
+          endDate={viewRange.end}
           events={visibleEvents}
           signedIn={status === "authenticated"}
           calendarColors={calendarColors}
@@ -1082,6 +1311,7 @@ export default function HomePage() {
               prev.includes(id) ? prev : [...prev, id]
             );
           }}
+          onNavigateToEvent={onNavigateToEvent}
         />
       </div>
     </div>

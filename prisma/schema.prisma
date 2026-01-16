@@ -63,6 +63,7 @@ model UserPreferences {
   showDaysOfWeek    Boolean  @default(true)
   showHidden         Boolean  @default(false)
   calendarColors    String   @default("{}") // JSON object
+  viewType          String?  // "year" | "6month" | "3month"
   updatedAt          DateTime @updatedAt
 }
 

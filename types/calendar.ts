@@ -15,3 +15,5 @@ export type AllDayEvent = {
   calendarId?: string;
 };
 
+export type CalendarViewType = "year" | "6month" | "3month";
+
