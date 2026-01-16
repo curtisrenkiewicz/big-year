@@ -72,21 +72,51 @@ After updating the environment variables and Google OAuth settings, trigger a ne
 
 If users are seeing a Google security warning that says "Esta aplicación está bloqueada" (This application is blocked), this means Google is blocking access to sensitive scopes. Here's how to fix it:
 
+### ⚠️ Important: "Verified" vs "Published"
+
+**These are two different things in Google OAuth:**
+
+- ✅ **Verified**: Your app has completed Google's verification process (can take weeks)
+- ✅ **Published**: Your app is available to ALL users (not just test users)
+
+**If your app shows as "verified" in Google Console but users still see "This app is blocked", your app is likely NOT published (still in "Testing" mode).**
+
 ### Critical: Publish Your App
 
-**The most common cause is that your app is still in "Testing" mode.** When an app is in testing mode, only users added to the test users list can access it. All other users will see the blocked error.
+**The most common cause is that your app is still in "Testing" mode.** When an app is in testing mode, only users added to the test users list can access it. All other users will see the blocked error, **even if your app is verified**.
 
-1. Go to [Google Cloud Console OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
-2. Check the **Publishing status** section at the top
-3. If it says "Testing", click **Publish App**
-4. Confirm the publishing
-5. **Important**: After publishing, wait 5-10 minutes for changes to propagate
+**To access the OAuth consent screen:**
+
+**⚠️ IMPORTANT: If you see "You need additional access" error:**
+
+Even if you're the only user, you need to grant yourself the proper IAM role:
+
+1. Go to **"IAM & Admin"** → **"IAM"** (in the left sidebar)
+2. Find your email address in the list
+3. If missing or has limited role, click **"+ GRANT ACCESS"** or edit your existing role
+4. Grant yourself **"Owner"** role (or at minimum **"Editor"**)
+5. Click **"SAVE"** and wait 10-30 seconds
+6. Then try accessing OAuth consent screen again
+
+**Once you have proper permissions:**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. **Select your project** (the one for bigyear.app) from the project dropdown at the top
+3. In the **left sidebar**, under **"APIs & Services"**, click **"OAuth consent screen"** directly
+4. Once on the OAuth consent screen page, look at the **Publishing status** section at the top
+5. If it says "Testing", click **Publish App**
+6. Confirm the publishing
+7. **Important**: After publishing, wait 5-10 minutes for changes to propagate
+
+**If the consent screen isn't configured yet:**
+- You'll see a setup wizard - choose "External" user type and fill out the required fields
+- See the troubleshooting guide for detailed setup steps
 
 ### Verify OAuth Consent Screen Configuration
 
 Make sure your OAuth consent screen is fully configured:
 
-1. Go to [Google Cloud Console OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+1. Navigate to OAuth consent screen (see steps above: APIs & Services → OAuth consent screen)
 2. Verify all required fields are filled:
    - **App name**: Big Year (or your preferred name)
    - **User support email**: Your email address
@@ -130,7 +160,7 @@ To remove the Google "unverified app" warning screens, you need to configure you
 
 ### Step 1: Configure OAuth Consent Screen
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials/consent)
+1. Navigate to OAuth consent screen (APIs & Services → OAuth consent screen)
 2. Select your OAuth 2.0 Client ID project
 3. Fill out the **OAuth consent screen**:
    - **User Type**: Choose "External" (unless you have a Google Workspace)
@@ -164,7 +194,7 @@ After configuring the consent screen:
 
 For complete removal of warnings and a verified badge:
 
-1. Go to [Google Cloud Console OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+1. Navigate to OAuth consent screen (APIs & Services → OAuth consent screen)
 2. Click **Submit for verification**
 3. Complete the verification form with:
    - Detailed explanation of why you need each scope
@@ -174,13 +204,57 @@ For complete removal of warnings and a verified badge:
 
 **Important**: The privacy policy and terms pages are already created at `/privacy` and `/terms`. Make sure your app is deployed so these URLs are accessible before submitting for verification.
 
+## Troubleshooting: "Verified" but Still Seeing Warnings
+
+If Google Cloud Console shows your app as verified (green checkmark) but you're still seeing "Google hasn't verified this app" warnings:
+
+### 1. Check Verification Center Details
+
+1. Navigate to OAuth consent screen (APIs & Services → OAuth consent screen)
+2. Click **"Go to Verification Center"** (in the App verification section)
+3. Check the detailed verification status:
+   - Is verification complete for all scopes?
+   - Are there any pending items?
+   - Does it show verification for sensitive scopes like `calendar.events`?
+
+### 2. Clear Browser Cache
+
+The warning may be cached in your browser:
+
+1. Clear cookies for `accounts.google.com`
+2. Or use an **incognito/private window** to test
+3. Try signing in again
+
+### 3. Wait for Propagation
+
+Even after verification:
+
+- Changes can take **24-48 hours** to fully propagate
+- The warning may persist briefly even after verification
+- Different Google services may update at different times
+
+### 4. Verify All Scopes Are Covered
+
+Sometimes verification is complete for branding but not for sensitive scopes:
+
+- Check that `calendar.events` scope is included in verification
+- Sensitive scopes may require additional verification steps
+
+### 5. Users Can Still Proceed
+
+Even with the warning:
+
+- Users can click **"Advanced"** → **"Go to [app name] (unsafe)"** to proceed
+- The app will work normally
+- The warning is informational, not a blocker
+
 ## Fixing Domain Verification Issues
 
 If you see an error in Google Cloud Console that says "The website of your home page URL 'https://bigyear.app' is not registered to you", you need to verify domain ownership.
 
 ### Step 1: Add Domain to Authorized Domains
 
-1. Go to [Google Cloud Console OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+1. Navigate to OAuth consent screen (APIs & Services → OAuth consent screen)
 2. Scroll down to the **App domain** section
 3. Under **Authorized domains**, make sure `bigyear.app` is listed
 4. If it's not there, click **+ ADD DOMAIN** and add `bigyear.app`
@@ -323,7 +397,7 @@ To enable incremental authorization support:
 
 To enable Cross-Account Protection:
 
-1. Go to [APIs & Services → OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+1. Navigate to OAuth consent screen (APIs & Services → OAuth consent screen)
 2. Scroll down to find **Advanced settings** or look for **Security** section
 3. Enable **Cross-Account Protection**
 4. This feature helps prevent unauthorized access when users have multiple Google accounts

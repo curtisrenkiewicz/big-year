@@ -61,6 +61,7 @@ model UserPreferences {
   selectedCalendarIds String  @default("[]") // JSON array
   hiddenEventIds     String   @default("[]") // JSON array
   showDaysOfWeek    Boolean  @default(true)
+  alignWeekends     Boolean  @default(false)
   showHidden         Boolean  @default(false)
   calendarColors    String   @default("{}") // JSON object
   viewType          String?  // "year" | "6month" | "3month"

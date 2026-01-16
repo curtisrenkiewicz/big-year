@@ -4,6 +4,15 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { YearCalendar, AllDayEvent } from "@/components/year-calendar";
 import {
   ChevronLeft,
@@ -15,8 +24,10 @@ import {
   X,
   Clock,
   Calendar as CalendarIcon,
+  Trash2,
 } from "lucide-react";
-import { formatDateKey } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { formatDateKey, cn } from "@/lib/utils";
 import { CalendarListItem, CalendarViewType } from "@/types/calendar";
 
 type LinkedAccount = {
@@ -87,6 +98,7 @@ export default function HomePage() {
   const [hiddenEventIds, setHiddenEventIds] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState<boolean>(false);
   const [showDaysOfWeek, setShowDaysOfWeek] = useState<boolean>(false);
+  const [alignWeekends, setAlignWeekends] = useState<boolean>(false);
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [createTitle, setCreateTitle] = useState<string>("");
   const [createStartDate, setCreateStartDate] = useState<string>("");
@@ -99,6 +111,14 @@ export default function HomePage() {
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const endDateInputRef = useRef<HTMLInputElement | null>(null);
   const preferencesLoaded = useRef<boolean>(false);
+  const [preferencesLoadedState, setPreferencesLoadedState] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const createModalRef = useRef<HTMLDivElement | null>(null);
+  const [createDragOffset, setCreateDragOffset] = useState<number>(0);
+  const [createIsDragging, setCreateIsDragging] = useState<boolean>(false);
+  const [createIsAnimatingIn, setCreateIsAnimatingIn] = useState<boolean>(false);
+  const createDragStartY = useRef<number>(0);
+  const createDragStartOffset = useRef<number>(0);
 
   const viewRange = useMemo(() => {
     return calculateViewRange(viewType, year, viewStartDate);
@@ -260,10 +280,12 @@ export default function HomePage() {
   // Load preferences from server when authenticated
   useEffect(() => {
     if (status === "authenticated" && !preferencesLoaded.current) {
-      preferencesLoaded.current = true;
       fetch("/api/preferences")
         .then((res) => res.json())
         .then((data) => {
+          // Only mark as loaded after successfully fetching preferences
+          preferencesLoaded.current = true;
+          setPreferencesLoadedState(true);
           if (data.selectedCalendarIds !== undefined) {
             setSelectedCalendarIds(data.selectedCalendarIds);
           }
@@ -272,6 +294,9 @@ export default function HomePage() {
           }
           if (data.showDaysOfWeek !== undefined) {
             setShowDaysOfWeek(data.showDaysOfWeek);
+          }
+          if (data.alignWeekends !== undefined) {
+            setAlignWeekends(data.alignWeekends);
           }
           if (data.showHidden !== undefined) {
             setShowHidden(data.showHidden);
@@ -292,12 +317,176 @@ export default function HomePage() {
         .catch((err) => {
           console.error("Failed to load preferences:", err);
           preferencesLoaded.current = false;
+          setPreferencesLoadedState(false);
         });
     } else if (status !== "authenticated") {
       preferencesLoaded.current = false;
+      setPreferencesLoadedState(false);
     }
   }, [status]);
 
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Animate create modal in from bottom on mobile
+  useEffect(() => {
+    if (createOpen && isMobile) {
+      setCreateIsAnimatingIn(true);
+      setCreateIsDragging(false);
+      setCreateDragOffset(typeof window !== "undefined" ? window.innerHeight : 1000);
+      const timeout = setTimeout(() => {
+        setCreateDragOffset(0);
+        setTimeout(() => setCreateIsAnimatingIn(false), 300);
+      }, 10);
+      return () => clearTimeout(timeout);
+    } else if (!createOpen) {
+      setCreateDragOffset(0);
+      setCreateIsDragging(false);
+      setCreateIsAnimatingIn(false);
+    }
+  }, [createOpen, isMobile]);
+
+  // Add non-passive touch event listeners for drag-to-dismiss
+  useEffect(() => {
+    if (!isMobile || !createModalRef.current) return;
+
+    const modal = createModalRef.current;
+    const headerHeight = 80;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (createSubmitting) return;
+      const touch = e.touches[0];
+      const target = e.target as HTMLElement;
+      
+      const isHeaderElement =
+        target.closest('[aria-label="Close"]') ||
+        target.closest("button[class*='p-1']");
+      
+      // Don't start dragging if clicking a button
+      if (isHeaderElement) return;
+
+      const rect = modal.getBoundingClientRect();
+      const touchY = touch.clientY - rect.top;
+      const scrollTop = modal.scrollTop;
+
+      const isInHeader = touchY < headerHeight && scrollTop === 0;
+
+      if (isInHeader) {
+        setCreateIsDragging(true);
+        createDragStartY.current = touch.clientY;
+        createDragStartOffset.current = createDragOffset;
+        e.preventDefault();
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!createIsDragging || createSubmitting) return;
+      const touch = e.touches[0];
+      const deltaY = touch.clientY - createDragStartY.current;
+      const newOffset = Math.max(0, createDragStartOffset.current + deltaY);
+      setCreateDragOffset(newOffset);
+      e.preventDefault();
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!createIsDragging) return;
+      const target = e.target as HTMLElement;
+      const isHeaderElement =
+        target.closest('[aria-label="Close"]') ||
+        target.closest("button[class*='p-1']");
+      
+      setCreateIsDragging(false);
+
+      const threshold = Math.min(100, window.innerHeight * 0.2);
+      if (createDragOffset > threshold) {
+        setCreateOpen(false);
+        setTimeout(() => setCreateDragOffset(0), 300);
+      } else {
+        setCreateDragOffset(0);
+      }
+      
+      // Don't prevent default if clicking a button, so onClick can fire
+      if (!isHeaderElement) {
+        e.preventDefault();
+      }
+    };
+
+    modal.addEventListener("touchstart", handleTouchStart, { passive: false });
+    modal.addEventListener("touchmove", handleTouchMove, { passive: false });
+    modal.addEventListener("touchend", handleTouchEnd, { passive: false });
+
+    return () => {
+      modal.removeEventListener("touchstart", handleTouchStart);
+      modal.removeEventListener("touchmove", handleTouchMove);
+      modal.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [isMobile, createSubmitting, createIsDragging, createDragOffset, createOpen]);
+
+  // Handle calendar selection when both calendars and preferences are loaded
+  // This runs when preferences finish loading (if calendars are already loaded)
+  // or when calendars finish loading (if preferences are already loaded)
+  const processedCalendarSelectionRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (
+      status === "authenticated" &&
+      preferencesLoadedState &&
+      calendars.length > 0 &&
+      !processedCalendarSelectionRef.current
+    ) {
+      processedCalendarSelectionRef.current = true;
+      const allIds = calendars.map((c) => c.id);
+      
+      // Check if we have a saved selection from preferences
+      // selectedCalendarIds from preferences will be set when preferences load
+      // We need to check the actual state at this point
+      const currentSelection = selectedCalendarIds;
+      
+      // If we have no saved selection (empty array), auto-select all for first-time user
+      if (currentSelection.length === 0) {
+        setSelectedCalendarIds(allIds);
+      } else {
+        // We have a saved selection - filter invalid and add new account calendars
+        const validSelection = currentSelection.filter((id) =>
+          allIds.includes(id)
+        );
+        // Check for new accounts and auto-add their calendars
+        const currentAccIds = new Set(
+          validSelection
+            .map((id) => extractAccountIdFromCalendarId(id))
+            .filter(Boolean)
+        );
+        const allAccIds = getAccountIdsFromCalendars(calendars);
+        const newAccIds = allAccIds.filter((id) => !currentAccIds.has(id));
+        if (newAccIds.length > 0) {
+          const toAdd = calendars
+            .filter((c) => {
+              const accId = extractAccountIdFromCalendarId(c.id);
+              return accId && newAccIds.includes(accId);
+            })
+            .map((c) => c.id);
+          const newSelection = Array.from(
+            new Set([...validSelection, ...toAdd])
+          );
+          setSelectedCalendarIds(newSelection);
+        } else if (validSelection.length !== currentSelection.length) {
+          // Just filter invalid calendars
+          setSelectedCalendarIds(validSelection);
+        }
+      }
+    }
+    if (status !== "authenticated") {
+      processedCalendarSelectionRef.current = false;
+    }
+  }, [status, preferencesLoadedState, calendars, selectedCalendarIds]);
+
+>>>>>>> upstream/main
   const visibleEvents = useMemo(() => {
     if (showHidden) return events;
     return events.filter((e) => !hiddenEventIds.includes(e.id));
@@ -335,11 +524,7 @@ export default function HomePage() {
           const filteredEvents = allEvents.filter((ev) => {
             const evStart = new Date(ev.startDate + "T00:00:00Z");
             const evEnd = new Date(ev.endDate + "T00:00:00Z");
-            const daysDiff = Math.round((evEnd.getTime() - evStart.getTime()) / (1000 * 60 * 60 * 24));
             const passes = evStart < range.end && evEnd > range.start;
-            // #region agent log
-            fetch('http://127.0.0.1:7244/ingest/0cf6602c-f8f9-4a33-882f-9475494723f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:343',message:'Event filtering',data:{eventId:ev.id,summary:ev.summary,startDate:ev.startDate,endDate:ev.endDate,daysDiff,isSingleDay:daysDiff===1,passes,rangeStart:range.start.toISOString(),rangeEnd:range.end.toISOString(),viewType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-            // #endregion
             return passes;
           });
           setEvents(filteredEvents);
@@ -364,6 +549,7 @@ export default function HomePage() {
     fetch(`/api/calendars`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
+        // Always update calendars list
         const list = (data.calendars || []) as CalendarListItem[];
         const accs = (data.accounts || []) as LinkedAccount[];
         setCalendars(list);
@@ -409,20 +595,10 @@ export default function HomePage() {
             history.replaceState({}, "", url.toString());
           }
         } else {
-          // Normal load: filter invalid calendars and add new account calendars
-          newSelection = handleNormalLoadCalendarSelection(
-            list,
-            selectedCalendarIds,
-            allIds,
-            preferencesLoaded.current
-          );
-          // Only update if selection actually changed
-          if (
-            newSelection.length !== selectedCalendarIds.length ||
-            !newSelection.every((id) => selectedCalendarIds.includes(id))
-          ) {
-            setSelectedCalendarIds(newSelection);
-          }
+          // Normal load: don't modify calendar selection here
+          // Calendar selection is handled by the separate useEffect that runs
+          // after both preferences and calendars are loaded
+          // This prevents race conditions where calendars load before preferences
         }
 
         // Update calendar colors (merge with existing, add defaults for new calendars)
@@ -436,7 +612,79 @@ export default function HomePage() {
         setSelectedCalendarIds([]);
         setCalendarColors({});
       });
-  }, [status]);
+  }, [status, preferencesLoadedState]);
+
+  useEffect(() => {
+    if (!createOpen) {
+      // Clear date when dialog closes so it doesn't persist
+      setCreateStartDate("");
+      createDateFromDayClick.current = null;
+      return;
+    }
+    setCreateError("");
+    setCreateTitle("");
+    setCreateHasEndDate(false);
+    setCreateEndDate("");
+    // Use date from day click if available, otherwise use default
+    if (createDateFromDayClick.current) {
+      setCreateStartDate(createDateFromDayClick.current);
+      createDateFromDayClick.current = null;
+    } else {
+      const now = new Date();
+      const defaultDate =
+        now.getFullYear() === year ? now : new Date(year, 0, 1);
+      setCreateStartDate(formatDateKey(defaultDate));
+    }
+    // Prefer a writable primary calendar; else first writable; else first overall.
+    const primaryWritable = writableCalendars.find((c) => c.primary)?.id;
+    const firstWritable = writableCalendars[0]?.id;
+    const firstAny = calendars[0]?.id;
+    setCreateCalendarId(primaryWritable || firstWritable || firstAny || "");
+  }, [createOpen, calendars, writableCalendars, year]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && createOpen && !createSubmitting) {
+        setCreateOpen(false);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [createOpen, createSubmitting]);
+
+  // Persist preferences to server whenever they change
+  useEffect(() => {
+    if (status === "authenticated" && preferencesLoaded.current) {
+      // Debounce API calls to avoid too many requests
+      const timeoutId = setTimeout(() => {
+        fetch("/api/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selectedCalendarIds,
+            hiddenEventIds,
+            showDaysOfWeek,
+            alignWeekends,
+            showHidden,
+            calendarColors,
+            viewType,
+          }),
+        }).catch((err) => {
+          console.error("Failed to save preferences:", err);
+        });
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [
+    status,
+    selectedCalendarIds,
+    hiddenEventIds,
+    showDaysOfWeek,
+    alignWeekends,
+    showHidden,
+    calendarColors,
+    viewType,
+  ]);
 
   useEffect(() => {
     if (!createOpen) {
@@ -730,7 +978,7 @@ export default function HomePage() {
 
   return (
     <div className="h-screen w-screen flex flex-col">
-      <div className="grid grid-cols-3 items-center p-3">
+      <div className="grid grid-cols-3 items-center p-3 bg-[hsl(0,0%,99%)] dark:bg-[hsl(0,0%,8%)] border-b border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)]">
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -804,9 +1052,11 @@ export default function HomePage() {
               <TabsTrigger value="year">1y</TabsTrigger>
             </TabsList>
           </Tabs>
+          <ThemeToggle />
           <Button
             variant="outline"
             className="gap-2 rounded-full justify-center"
+>>>>>>> upstream/main
             onClick={() => setCreateOpen(true)}
             disabled={status !== "authenticated"}
             aria-label="Create event"
@@ -817,67 +1067,127 @@ export default function HomePage() {
             }
           >
             <Plus className="h-4 w-4" />
-            <span>Create event</span>
           </Button>
         </div>
       </div>
       {createOpen && (
         <>
+          {isMobile && (
+            <div
+              className="fixed inset-0 bg-background/60 z-40"
+              onClick={() => {
+                if (!createSubmitting) {
+                  setCreateOpen(false);
+                }
+              }}
+              aria-hidden
+            />
+          )}
           <div
-            className="fixed inset-0 bg-background/60 z-40"
-            onClick={() => {
-              if (!createSubmitting) {
-                setCreateOpen(false);
-              }
-            }}
-            aria-hidden
-          />
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            ref={createModalRef}
+            className={cn(
+              "border border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)] bg-[hsl(0,0%,99%)] dark:bg-[hsl(0,0%,10%)] shadow-lg pointer-events-auto z-50",
+              isMobile
+                ? "fixed bottom-0 left-0 right-0 w-full rounded-t-3xl rounded-b-none max-h-[80vh] overflow-y-auto transition-transform"
+                : "fixed rounded-md w-full max-w-md"
+            )}
+            style={
+              isMobile
+                ? {
+                    transform: `translateY(${Math.max(0, createDragOffset)}px)`,
+                    transition: createIsDragging
+                      ? "none"
+                      : createIsAnimatingIn
+                        ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                        : "transform 0.3s ease-out",
+                  }
+                : {
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    maxWidth: "400px",
+                  }
+            }
             role="dialog"
             aria-label="Create event"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className="w-full max-w-md rounded-md border bg-card shadow-lg pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-                <div className="font-semibold">Create event</div>
-                <button
-                  className="text-muted-foreground hover:text-foreground flex-shrink-0 ml-2"
-                  onClick={() =>
-                    createSubmitting ? null : setCreateOpen(false)
-                  }
-                  aria-label="Close"
-                  disabled={createSubmitting}
-                >
-                  <X className="h-4 w-4" />
-                </button>
+          <div
+            className={cn(
+              "flex items-center justify-between",
+              isMobile ? "px-6 pt-6 pb-4" : "px-4 pt-4 pb-2"
+            )}
+          >
+              <div
+                className={cn(
+                  isMobile ? "text-lg font-semibold" : "font-semibold"
+                )}
+              >
+                Event
               </div>
-              <div className="px-4 pt-2 pb-4 space-y-3">
+              <button
+                className="text-muted-foreground hover:text-foreground flex-shrink-0 p-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!createSubmitting) {
+                    setCreateOpen(false);
+                  }
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                aria-label="Close"
+                disabled={createSubmitting}
+              >
+                <X className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
+              </button>
+          </div>
+          <div
+            className={cn(
+              "space-y-3",
+              isMobile ? "px-6 pb-4" : "px-4 pt-2 pb-4"
+            )}
+          >
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <Plus className="h-4 w-4" />
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
+                    <Plus className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")} />
                   </div>
                   <input
-                    className="flex-1 border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
+                    className={cn(
+                      "flex-1 border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 placeholder:text-muted-foreground",
+                      isMobile ? "text-base" : "text-sm"
+                    )}
                     placeholder="Event title"
                     value={createTitle}
                     onChange={(e) => setCreateTitle(e.target.value)}
                     disabled={createSubmitting}
-                    autoFocus
+                    autoFocus={!isMobile}
                   />
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-muted-foreground">
-                    <CalendarIcon className="h-4 w-4" />
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center text-muted-foreground",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
+                    <CalendarIcon
+                      className={cn(isMobile ? "h-5 w-5" : "h-4 w-4")}
+                    />
+                  </div>
                   </div>
                   <div className="flex-1 flex items-center justify-between">
                     <div className="flex items-center">
                       <input
                         ref={startDateInputRef}
                         type="date"
-                        className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 w-24 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                        className={cn(
+                          "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                          isMobile ? "text-base w-28" : "text-sm w-24"
+                        )}
                         value={createStartDate}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -903,7 +1213,10 @@ export default function HomePage() {
                           <input
                             ref={endDateInputRef}
                             type="date"
-                            className="border-0 bg-transparent px-0 py-1 text-sm focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                            className={cn(
+                              "border-0 bg-transparent px-0 py-1 focus:outline-none focus:ring-0 ml-2 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none",
+                              isMobile ? "text-base w-28" : "text-sm"
+                            )}
                             value={createEndDate}
                             min={createStartDate || undefined}
                             onChange={(e) => setCreateEndDate(e.target.value)}
@@ -919,19 +1232,30 @@ export default function HomePage() {
                     {createHasEndDate ? (
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        className={cn(
+                          "text-muted-foreground hover:text-foreground flex-shrink-0",
+                          isMobile ? "p-1" : "text-xs"
+                        )}
                         onClick={() => {
                           setCreateHasEndDate(false);
                           setCreateEndDate("");
                         }}
                         disabled={createSubmitting}
+                        aria-label="Remove end date"
                       >
-                        Remove
+                        {isMobile ? (
+                          <Trash2 className="h-5 w-5" />
+                        ) : (
+                          "Remove"
+                        )}
                       </button>
                     ) : (
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        className={cn(
+                          "text-muted-foreground hover:text-foreground",
+                          isMobile ? "text-sm" : "text-xs"
+                        )}
                         onClick={() => {
                           setCreateHasEndDate(true);
                           if (!createEndDate) setCreateEndDate(createStartDate);
@@ -944,16 +1268,29 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                  <div
+                    className={cn(
+                      "flex-shrink-0 flex items-center justify-center",
+                      isMobile ? "w-6 h-6" : "w-5 h-5"
+                    )}
+                  >
                     {createCalendarId && calendarColors[createCalendarId] ? (
                       <div
-                        className="w-3 h-3 rounded-full"
+                        className={cn(
+                          "rounded-full",
+                          isMobile ? "w-5 h-5" : "w-3 h-3"
+                        )}
                         style={{
                           backgroundColor: calendarColors[createCalendarId],
                         }}
                       />
                     ) : (
-                      <div className="w-3 h-3 rounded-full bg-muted" />
+                      <div
+                        className={cn(
+                          "rounded-full bg-muted",
+                          isMobile ? "w-5 h-5" : "w-3 h-3"
+                        )}
+                      />
                     )}
                   </div>
                   <div className="flex-1">
@@ -962,7 +1299,12 @@ export default function HomePage() {
                       onValueChange={setCreateCalendarId}
                       disabled={createSubmitting}
                     >
-                      <SelectTrigger className="w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1">
+                      <SelectTrigger
+                        className={cn(
+                          "w-full border-0 bg-transparent px-0 py-1 h-auto shadow-none focus:ring-0 justify-start gap-1",
+                          isMobile ? "text-base" : "text-sm"
+                        )}
+                      >
                         <SelectValue placeholder="Select a calendar" />
                       </SelectTrigger>
                       <SelectContent>
@@ -995,37 +1337,53 @@ export default function HomePage() {
                   </div>
                 </div>
                 {writableCalendars.length === 0 && calendars.length > 0 && (
-                  <div className="text-xs text-muted-foreground pl-8">
+                  <div
+                    className={cn(
+                      "text-muted-foreground",
+                      isMobile ? "text-sm pl-8" : "text-xs pl-8"
+                    )}
+                  >
                     No writable calendars found; creating may fail on read-only
                     calendars.
                   </div>
                 )}
                 {createError && (
-                  <div className="text-sm text-destructive pl-8">
+                  <div
+                    className={cn(
+                      "text-destructive",
+                      isMobile ? "text-base pl-8" : "text-sm pl-8"
+                    )}
+                  >
                     {createError}
                   </div>
                 )}
-              </div>
-              <div className="p-4 border-t flex items-center justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setCreateOpen(false)}
-                  disabled={createSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={onCreateEvent}
-                  disabled={
-                    createSubmitting ||
-                    status !== "authenticated" ||
-                    !createTitle.trim()
-                  }
-                >
-                  {createSubmitting ? "Creating…" : "Create"}
-                </Button>
-              </div>
-            </div>
+          </div>
+          <div
+            className={cn(
+              "flex gap-2 items-center",
+              isMobile ? "px-6 pb-6" : "px-4 pb-4 justify-end"
+            )}
+          >
+            <Button
+              variant="outline"
+              className={cn(isMobile && "flex-1", "bg-transparent border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)]")}
+              onClick={() => setCreateOpen(false)}
+              disabled={createSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              className={cn(isMobile && "flex-1")}
+              onClick={onCreateEvent}
+              disabled={
+                createSubmitting ||
+                status !== "authenticated" ||
+                !createTitle.trim()
+              }
+            >
+              {createSubmitting ? "Creating…" : "Create"}
+            </Button>
+          </div>
           </div>
         </>
       )}
@@ -1037,11 +1395,11 @@ export default function HomePage() {
             aria-hidden
           />
           <aside
-            className="fixed inset-y-0 left-0 z-50 w-72 max-w-[80vw] bg-card border-r shadow-lg flex flex-col"
+            className="fixed inset-y-0 left-0 z-50 w-72 max-w-[80vw] bg-[hsl(0,0%,99%)] dark:bg-[hsl(0,0%,10%)] border-r border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)] shadow-lg flex flex-col"
             role="dialog"
             aria-label="Menu"
           >
-            <div className="p-3 border-b flex items-center justify-between relative">
+            <div className="p-3 border-b border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)] flex items-center justify-between relative">
               <div className="font-semibold">Calendars</div>
               <div className="flex items-center gap-1">
                 <Button
@@ -1076,7 +1434,7 @@ export default function HomePage() {
                           onClick={() => setSettingsDropdownOpen(false)}
                           aria-hidden
                         />
-                        <div className="absolute right-0 top-full mt-1 w-56 bg-card border rounded-md shadow-lg z-20 p-2 space-y-2">
+                        <div className="absolute right-0 top-full mt-1 w-56 bg-[hsl(0,0%,99%)] dark:bg-[hsl(0,0%,10%)] border border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)] rounded-md shadow-lg z-20 p-2 space-y-2">
                           <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent p-2 rounded">
                             <input
                               type="checkbox"
@@ -1087,6 +1445,17 @@ export default function HomePage() {
                               }
                             />
                             <span>Show days of week</span>
+                          </label>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent p-2 rounded">
+                            <input
+                              type="checkbox"
+                              className="accent-foreground"
+                              checked={alignWeekends}
+                              onChange={(e) =>
+                                setAlignWeekends(e.target.checked)
+                              }
+                            />
+                            <span>Align weekends</span>
                           </label>
                           {hiddenEventIds.length > 0 && (
                             <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent p-2 rounded">
@@ -1186,7 +1555,7 @@ export default function HomePage() {
                 <div className="px-2 py-3">
                   <Button
                     variant="outline"
-                    className="w-full justify-center gap-2 rounded-full"
+                    className="w-full justify-center gap-2 rounded-full bg-transparent hover:bg-[rgba(255,255,255,0.1)] dark:hover:bg-[rgba(255,255,255,0.1)]"
                     onClick={() => {
                       // Persist existing accountIds so we can auto-add the new account's calendars after linking
                       try {
@@ -1214,11 +1583,11 @@ export default function HomePage() {
                 </div>
               )}
             </div>
-            <div className="p-3 border-t">
+            <div className="p-3 border-t border-[hsl(0,0%,85%)] dark:border-[hsl(0,0%,20%)]">
               {status === "authenticated" ? (
                 <>
                   <Button
-                    className="w-full justify-center gap-2 rounded-full"
+                    className="w-full justify-center gap-2 rounded-full bg-transparent hover:bg-[rgba(255,255,255,0.1)] dark:hover:bg-[rgba(255,255,255,0.1)]"
                     variant="outline"
                     onClick={() => {
                       setSidebarOpen(false);
@@ -1274,6 +1643,7 @@ export default function HomePage() {
           writableCalendars={writableCalendars}
           writableAccountsWithCalendars={writableAccountsWithCalendars}
           showDaysOfWeek={showDaysOfWeek}
+          alignWeekends={alignWeekends}
           onDayClick={(dateKey) => {
             if (status === "authenticated") {
               createDateFromDayClick.current = dateKey;
@@ -1311,7 +1681,6 @@ export default function HomePage() {
               prev.includes(id) ? prev : [...prev, id]
             );
           }}
-          onNavigateToEvent={onNavigateToEvent}
         />
       </div>
     </div>

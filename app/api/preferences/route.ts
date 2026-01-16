@@ -40,6 +40,7 @@ export async function GET() {
           selectedCalendarIds: "[]",
           hiddenEventIds: "[]",
           showDaysOfWeek: true,
+          alignWeekends: false,
           showHidden: false,
           calendarColors: "{}",
           viewType: "year",
@@ -51,6 +52,7 @@ export async function GET() {
       selectedCalendarIds: JSON.parse(prefs.selectedCalendarIds),
       hiddenEventIds: JSON.parse(prefs.hiddenEventIds),
       showDaysOfWeek: prefs.showDaysOfWeek,
+      alignWeekends: prefs.alignWeekends ?? false,
       showHidden: prefs.showHidden,
       calendarColors: JSON.parse(prefs.calendarColors),
       viewType: prefs.viewType || "year",
@@ -102,6 +104,7 @@ export async function PUT(req: NextRequest) {
       selectedCalendarIds,
       hiddenEventIds,
       showDaysOfWeek,
+      alignWeekends,
       showHidden,
       calendarColors,
       viewType,
@@ -139,6 +142,9 @@ export async function PUT(req: NextRequest) {
       }
       updateData.showDaysOfWeek = showDaysOfWeek;
     }
+    if (alignWeekends !== undefined) {
+      updateData.alignWeekends = Boolean(alignWeekends);
+    }
     if (showHidden !== undefined) {
       if (typeof showHidden !== "boolean") {
         return NextResponse.json(
@@ -169,44 +175,6 @@ export async function PUT(req: NextRequest) {
       updateData.viewType = viewType;
     }
 
-    // Check if there's anything to update
-    if (Object.keys(updateData).length === 0) {
-      // Nothing to update, just return current preferences
-      const existingPrefs = await prisma.userPreferences.findUnique({
-        where: { userId },
-      });
-      if (!existingPrefs) {
-        // Create default preferences if they don't exist
-        const newPrefs = await prisma.userPreferences.create({
-          data: {
-            userId,
-            selectedCalendarIds: "[]",
-            hiddenEventIds: "[]",
-            showDaysOfWeek: true,
-            showHidden: false,
-            calendarColors: "{}",
-            viewType: "year",
-          },
-        });
-        return NextResponse.json({
-          selectedCalendarIds: JSON.parse(newPrefs.selectedCalendarIds),
-          hiddenEventIds: JSON.parse(newPrefs.hiddenEventIds),
-          showDaysOfWeek: newPrefs.showDaysOfWeek,
-          showHidden: newPrefs.showHidden,
-          calendarColors: JSON.parse(newPrefs.calendarColors),
-          viewType: newPrefs.viewType || "year",
-        });
-      }
-      return NextResponse.json({
-        selectedCalendarIds: JSON.parse(existingPrefs.selectedCalendarIds),
-        hiddenEventIds: JSON.parse(existingPrefs.hiddenEventIds),
-        showDaysOfWeek: existingPrefs.showDaysOfWeek,
-        showHidden: existingPrefs.showHidden,
-        calendarColors: JSON.parse(existingPrefs.calendarColors),
-        viewType: existingPrefs.viewType || "year",
-      });
-    }
-
     const prefs = await prisma.userPreferences.upsert({
       where: { userId },
       update: updateData,
@@ -215,6 +183,7 @@ export async function PUT(req: NextRequest) {
         selectedCalendarIds: JSON.stringify(selectedCalendarIds || []),
         hiddenEventIds: JSON.stringify(hiddenEventIds || []),
         showDaysOfWeek: showDaysOfWeek ?? true,
+        alignWeekends: alignWeekends ?? false,
         showHidden: showHidden ?? false,
         calendarColors: JSON.stringify(calendarColors || {}),
         viewType: viewType || "year",
@@ -225,6 +194,7 @@ export async function PUT(req: NextRequest) {
       selectedCalendarIds: JSON.parse(prefs.selectedCalendarIds),
       hiddenEventIds: JSON.parse(prefs.hiddenEventIds),
       showDaysOfWeek: prefs.showDaysOfWeek,
+      alignWeekends: prefs.alignWeekends ?? false,
       showHidden: prefs.showHidden,
       calendarColors: JSON.parse(prefs.calendarColors),
       viewType: prefs.viewType || "year",

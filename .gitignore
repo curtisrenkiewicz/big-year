@@ -5,6 +5,9 @@ node_modules
 .env.bak
 .DS_Store
 .cursor/
+*.db
+*.db-journal
+prisma/dev.db
 
 
 
