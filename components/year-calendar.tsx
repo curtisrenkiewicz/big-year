@@ -20,6 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { AllDayEvent, CalendarListItem, CalendarViewType } from "@/types/calendar";
 
 export type { AllDayEvent, CalendarListItem };
@@ -706,45 +711,93 @@ export function YearCalendar({
                 const bg = seg.ev.calendarId
                   ? calendarColors[seg.ev.calendarId]
                   : undefined;
-                bars.push(
+                const calendarName = seg.ev.calendarId
+                  ? calendarNames[seg.ev.calendarId]
+                  : undefined;
+                const calendarAccount = seg.ev.calendarId
+                  ? calendarAccounts[seg.ev.calendarId]
+                  : undefined;
+                const hoverDetails = [calendarName, calendarAccount]
+                  .filter(Boolean)
+                  .join(" • ");
+                const barProps = {
+                  style: {
+                    position: "absolute" as const,
+                    left,
+                    top,
+                    width,
+                    height: laneHeight - 2,
+                  },
+                  className: "px-1 pointer-events-auto cursor-pointer",
+                  onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => {
+                    e.stopPropagation();
+                  },
+                  onClick: (e: React.MouseEvent<HTMLDivElement>) => {
+                    e.stopPropagation();
+                    const rect = (
+                      e.currentTarget as HTMLDivElement
+                    ).getBoundingClientRect();
+                    setPopover({
+                      event: seg.ev,
+                      x: rect.left + rect.width / 2,
+                      y: rect.bottom + 8,
+                    });
+                    setIsEditing(true);
+                  },
+                };
+                const barInner = (
                   <div
-                    key={key}
+                    className="truncate rounded-sm px-1 text-[10px] leading-[14px] shadow-sm text-white dark:text-black"
                     style={{
-                      position: "absolute",
-                      left,
-                      top,
-                      width,
+                      backgroundColor: bg || "hsl(var(--secondary))",
                       height: laneHeight - 2,
-                    }}
-                    className="px-1 pointer-events-auto cursor-pointer"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const rect = (
-                        e.currentTarget as HTMLDivElement
-                      ).getBoundingClientRect();
-                      setPopover({
-                        event: seg.ev,
-                        x: rect.left + rect.width / 2,
-                        y: rect.bottom + 8,
-                      });
-                      setIsEditing(true);
+                      lineHeight: `${laneHeight - 4}px`,
                     }}
                   >
-                    <div
-                      className="truncate rounded-sm px-1 text-[10px] leading-[14px] shadow-sm text-white dark:text-black"
-                      style={{
-                        backgroundColor: bg || "hsl(var(--secondary))",
-                        height: laneHeight - 2,
-                        lineHeight: `${laneHeight - 4}px`,
-                      }}
-                    >
-                      {seg.ev.summary}
-                    </div>
+                    {seg.ev.summary}
                   </div>
                 );
+                if (isMobile) {
+                  bars.push(
+                    <div key={key} {...barProps}>
+                      {barInner}
+                    </div>
+                  );
+                } else {
+                  bars.push(
+                    <HoverCard key={key} openDelay={150}>
+                      <HoverCardTrigger asChild>
+                        <div {...barProps}>{barInner}</div>
+                      </HoverCardTrigger>
+                      <HoverCardContent side="top" align="start" sideOffset={8}>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{
+                                backgroundColor: bg || "hsl(var(--secondary))",
+                              }}
+                            />
+                            <div className="text-sm font-semibold leading-tight">
+                              {seg.ev.summary}
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDisplayRange(
+                              seg.ev.startDate,
+                              seg.ev.endDate
+                            )}
+                          </div>
+                          {hoverDetails ? (
+                            <div className="text-xs text-muted-foreground">
+                              {hoverDetails}
+                            </div>
+                          ) : null}
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
+                  );
+                }
               }
             }
             return bars;
@@ -754,6 +807,9 @@ export function YearCalendar({
             gridDims.cols,
             cellSizePx,
             calendarColors,
+            calendarNames,
+            calendarAccounts,
+            isMobile,
           ])}
         </div>
       </div>
